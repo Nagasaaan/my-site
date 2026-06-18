@@ -4,7 +4,52 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>My Site</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
   <style>
+    #loader-overlay {
+      position: fixed;
+      inset: 0;
+      background: #f4f3ef;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.6s ease;
+    }
+    #loader-overlay.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #loader {
+      width: 200px;
+      height: 200px;
+      position: relative;
+    }
+    #loader svg {
+      display: block;
+      position: absolute;
+      inset: 0;
+    }
+    #whirl {
+      animation: whirl-spin 2.6s linear infinite;
+      transform-origin: 100px 100px;
+    }
+    @keyframes whirl-spin {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #whirl { animation: none; }
+    }
+
+    #main-content {
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+    #main-content.visible {
+      opacity: 1;
+    }
+
     body {
       font-family: sans-serif;
       max-width: 600px;
@@ -20,7 +65,119 @@
   </style>
 </head>
 <body>
-  <h1>ようこそ</h1>
-  <p>これは私の最初のウェブサイトです。</p>
+  <div id="loader-overlay">
+    <div id="loader">
+      <svg id="whirl" viewBox="0 0 200 200" width="200" height="200" aria-hidden="true">
+        <circle cx="100" cy="100" r="92" fill="none" stroke="#1c1c1a" stroke-width="1.4"
+                stroke-linecap="round" stroke-dasharray="60 38 22 250" opacity="0.55"/>
+        <circle cx="100" cy="100" r="92" fill="none" stroke="#1c1c1a" stroke-width="1.4"
+                stroke-linecap="round" stroke-dasharray="0 289 60 200" opacity="0.3"/>
+      </svg>
+      <svg id="globe" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Loading"></svg>
+    </div>
+  </div>
+
+  <div id="main-content">
+    <h1>ようこそ</h1>
+    <p>これは私の最初のウェブサイトです。</p>
+  </div>
+
+  <script>
+  (function () {
+    const SIZE = 200;
+    const R = 78;
+    const CENTER = SIZE / 2;
+    const STROKE = "#1c1c1a";
+
+    const svg = d3.select("#globe");
+
+    const projection = d3.geoOrthographic()
+      .scale(R)
+      .translate([CENTER, CENTER])
+      .clipAngle(90);
+
+    const path = d3.geoPath(projection);
+
+    svg.append("path")
+      .datum({ type: "Sphere" })
+      .attr("fill", "none")
+      .attr("stroke", STROKE)
+      .attr("stroke-width", 1.5)
+      .attr("d", path);
+
+    const graticule = d3.geoGraticule10();
+    svg.append("path")
+      .datum(graticule)
+      .attr("fill", "none")
+      .attr("stroke", STROKE)
+      .attr("stroke-width", 0.4)
+      .attr("opacity", 0.28);
+
+    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json")
+      .then(world => {
+        const countries = topojson.feature(world, world.objects.countries);
+        const borders = topojson.mesh(world, world.objects.countries, (a, b) => a !== b);
+
+        svg.append("path")
+          .datum(countries)
+          .attr("fill", STROKE)
+          .attr("fill-opacity", 0.9)
+          .attr("stroke", "none");
+
+        svg.append("path")
+          .datum(borders)
+          .attr("fill", "none")
+          .attr("stroke", "#f4f3ef")
+          .attr("stroke-width", 0.5)
+          .attr("stroke-opacity", 0.55);
+
+        render();
+      })
+      .catch(() => {});
+
+    let lon = parseFloat(localStorage.getItem("globe-loader-lon"));
+    if (isNaN(lon)) lon = 0;
+    const tilt = -18;
+    const speed = 28;
+
+    function render() {
+      projection.rotate([lon, tilt]);
+      svg.selectAll("path").attr("d", path);
+    }
+
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let last = performance.now();
+    let saveAccum = 0;
+    let animating = true;
+
+    function tick(now) {
+      if (!animating) return;
+      const dt = (now - last) / 1000;
+      last = now;
+      lon = (lon + speed * dt) % 360;
+      render();
+      saveAccum += dt;
+      if (saveAccum > 0.4) {
+        localStorage.setItem("globe-loader-lon", lon.toFixed(2));
+        saveAccum = 0;
+      }
+      requestAnimationFrame(tick);
+    }
+
+    render();
+    if (!reduce) requestAnimationFrame(tick);
+
+    setTimeout(() => {
+      animating = false;
+      const overlay = document.getElementById("loader-overlay");
+      const content = document.getElementById("main-content");
+      overlay.classList.add("fade-out");
+      content.classList.add("visible");
+      overlay.addEventListener("transitionend", () => {
+        overlay.style.display = "none";
+      }, { once: true });
+    }, 3000);
+  })();
+  </script>
 </body>
 </html>
