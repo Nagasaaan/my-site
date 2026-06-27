@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>天気アプリ</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    background-image: url('aaabbb.jpg');
+    background-size: cover;
+    background-position: center;    }
+    .container {
+      text-align: center;
+      background: rgba(255, 255, 255, 0.5);
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+      width: 300px;
+    }
+    input {
+      padding: 0.5rem;
+      width: 80%;
+      margin-bottom: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+    #result {
+      margin-top: 1.5rem;
+      font-size: 1.1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🌤 天気チェッカー</h2>
+    <input type="text" id="city" placeholder="都市名を英語で入力" oninput="showSuggestions()" autocomplete="off">
+    <div id="suggestions" style="text-align:left;"></div>
+    <br>
+    <button onclick="getWeather()">検索</button>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    const cities = [
+  'Tokyo', 'Osaka', 'Kyoto', 'Sapporo', 'Fukuoka',
+  'Nagoya', 'Yokohama', 'Kobe', 'Hiroshima', 'Sendai',
+  'London', 'Paris', 'New York', 'Los Angeles', 'Sydney',
+  'Bangkok', 'Singapore', 'Seoul', 'Beijing', 'Shanghai'
+];
+
+function showSuggestions() {
+  const input = document.getElementById('city').value.toLowerCase();
+  const box = document.getElementById('suggestions');
+  box.innerHTML = '';
+  if (!input) return;
+
+  const matched = cities.filter(c => c.toLowerCase().startsWith(input));
+  matched.forEach(c => {
+    const div = document.createElement('div');
+    div.textContent = c;
+    div.style.cssText = 'padding:6px 10px;cursor:pointer;border-bottom:1px solid #eee;';
+    div.onclick = () => {
+      document.getElementById('city').value = c;
+      box.innerHTML = '';
+    };
+    box.appendChild(div);
+  });
+}
+    const API_KEY = 'a6af4fedf52a0189352a6d156941b3db';
+
+    async function getWeather() {
+      const city = document.getElementById('city').value;
+      const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${API_KEY}&units=metric&lang=ja`;
+
+      try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.cod !== 200) {
+          document.getElementById('result').innerHTML = '都市が見つかりませんでした';
+          return;
+        }
+
+        document.getElementById('result').innerHTML = `
+          <p>📍 ${data.name}</p>
+          <p>🌡 ${data.main.temp}°C</p>
+          <p>☁️ ${data.weather[0].description}</p>
+          <p>💧 湿度: ${data.main.humidity}%</p>
+        `;
+      } catch (e) {
+        document.getElementById('result').innerHTML = 'エラーが発生しました';
+      }
+    }
+  </script>
+</body>
+</html>
