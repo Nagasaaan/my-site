@@ -163,7 +163,7 @@ function reset(){
   G.obs=[]; G.items=[]; G.props=[]; G.groups=[]; G.rockets=[]; G.parts=[]; G.fw=[]; G.texts=[];
   G.rings=[]; G.timers=[]; G.hitStop=0;
   G.obsTimer=1.6; G.itemTimer=1.0; G.puTimer=rnd(10,15); G.propTimer=0.3; G.evtTimer=rnd(7,13);
-  G.nextLamp=60; G.nextGate=250;
+  G.nextLamp=60;
   G.crystalRun=null;
   G.nextDT=380; G.nextBld=900;
   G.combo=0;
@@ -317,9 +317,6 @@ function spawnProp(){
 }
 function spawnLampPair(){ // 街灯(左右対・道沿いに連続)
   for(const side of [-1,1])G.props.push({type:'lamp',t:0,xoff:side*(ROAD_EDGE+55),side,seen:true,ph:0});
-}
-function spawnGate(){ // 道をまたぐ巨大ネオンゲート
-  G.props.push({type:'gate',t:0,xoff:0,side:1,seen:true,ph:0,line:ZONES[G.zoneIdx].name});
 }
 function spawnDriveThru(){
   // 店は道路脇に建ち、接している端レーン(±2)だけが受け取りレーン
@@ -487,7 +484,6 @@ function update(dt){
   G.propTimer-=dt;
   if(G.propTimer<=0){spawnProp();G.propTimer=rnd(0.18,0.45);}
   if(G.dist>G.nextLamp){spawnLampPair();G.nextLamp=G.dist+130;}
-  if(G.dist>G.nextGate){spawnGate();G.nextGate=G.dist+rnd(700,900);}
   G.evtTimer-=dt;
   if(G.evtTimer<=0){spawnEvent();G.evtTimer=rnd(9,16);}
   if(!G.bonus){
@@ -1355,7 +1351,7 @@ function drawAlienFigure(x,y,s,ph,col){
 function drawProp(pr){
   const pz=proj(pr.t,pr.xoff);
   const s=pz.s*2.3;   // 路肩キャラは大きめに描く(PCワイド画面向け)
-  if(s<0.45&&pr.type!=='gate'&&pr.type!=='lamp')return; // ゲートと街灯は遠くから見せる
+  if(s<0.45&&pr.type!=='lamp')return; // 街灯は遠くから見せる
   const sd=Math.abs(pr.xoff*0.7137)%100; // 形状用の固定シード(ph は動きの位相なので形状に使わない)
   ctx.save();
   const acc=css(G.col.acc);
@@ -1698,29 +1694,6 @@ function drawProp(pr){
       ctx.fillStyle=lc;
       ctx.beginPath();ctx.moveTo(pz.x+arm,pz.y-hh-6*s);ctx.lineTo(pz.x+arm-16*s,pz.y);ctx.lineTo(pz.x+arm+16*s,pz.y);ctx.closePath();ctx.fill();
       ctx.restore();
-      break;}
-    case 'gate':{ // 道をまたぐゾーンゲート
-      const gw=ROAD_EDGE+45,gh=120*s;
-      const a=proj(pr.t,-gw),b=proj(pr.t,gw);
-      const gc2=css(G.col.grid);
-      ctx.strokeStyle=gc2;ctx.lineWidth=5*s;ctx.shadowColor=gc2;ctx.shadowBlur=14;
-      ctx.beginPath();
-      ctx.moveTo(a.x,a.y);ctx.lineTo(a.x,a.y-gh);
-      ctx.moveTo(b.x,b.y);ctx.lineTo(b.x,b.y-gh);
-      ctx.stroke();
-      ctx.fillStyle='rgba(12,6,26,0.92)';
-      ctx.fillRect(a.x,a.y-gh-24*s,b.x-a.x,24*s);
-      ctx.strokeRect(a.x,a.y-gh-24*s,b.x-a.x,24*s);
-      if(s>0.3){
-        ctx.fillStyle=gc2;ctx.font=`900 ${17*s}px "Hiragino Kaku Gothic ProN",sans-serif`;
-        ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText(`— ${pr.line} —`,(a.x+b.x)/2,a.y-gh-12*s);
-      }
-      // 支柱の点滅灯
-      for(const px3 of [a.x,b.x]){
-        if((G.time*4|0)%2){ctx.fillStyle='#fff';ctx.shadowBlur=10;
-          ctx.beginPath();ctx.arc(px3,a.y-gh,3*s,0,6.28);ctx.fill();}
-      }
       break;}
     case 'ruin':default:{
       const hh=rndSeeded(sd)*40+30;
