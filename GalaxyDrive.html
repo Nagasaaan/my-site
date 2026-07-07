@@ -1,0 +1,2209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>RETROWAVE GALAXY DRIVE — 宇宙UFOドライブスルー</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#050110;overflow:hidden;touch-action:none;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{display:block;box-shadow:0 0 60px rgba(255,43,214,.25),0 0 120px rgba(0,229,255,.12);}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv" width="1280" height="720"></canvas></div>
+<script>
+'use strict';
+/* ============================================================
+   RETROWAVE GALAXY DRIVE 〜 宇宙UFOドライブスルー 〜
+   仕様書: ufo_synthwave_drive_game_spec.md
+   ============================================================ */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const W = 1280, H = 720;
+const VPY = 268;            // 地平線(消失点)Y
+const BOTY = H + 60;        // 手前端Y
+const LANE_W = 130;         // 手前でのレーン幅(5レーン)
+const LANE_MAX = 2;         // レーンは -2..2 の5本
+const ROAD_EDGE = LANE_W*2.5;
+const PT = 0.9;             // プレイヤーの奥行き位置(t)
+
+// ---------- ユーティリティ ----------
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const ri=(a,b)=>Math.floor(rnd(a,b+1));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const ease=t=>Math.pow(t,2.2);
+const camX=()=>(G&&G.player)?G.player.laneF*LANE_W*0.4:0;  // レーン移動時の視差カメラ
+// 横方向は完全には収束させない(遠くでも道幅・レーンが見えるように横に引き伸ばす)
+const XE_MIN=0.32;
+function proj(t,xoff){
+  const e=ease(t);
+  const xe=XE_MIN+(1-XE_MIN)*e;
+  return{x:W/2+(xoff-camX())*xe,y:VPY+(BOTY-VPY)*e,s:0.28+e*0.9,e,xe};
+}
+function groundShadow(x,y,w,a=0.45){ctx.save();ctx.fillStyle=`rgba(0,0,12,${a})`;ctx.beginPath();ctx.ellipse(x,y,w,w*0.26,0,0,6.28);ctx.fill();ctx.restore();}
+function h2r(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];}
+function css(c,a=1){return`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;}
+function mixc(a,b,t){return[lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)];}
+function fmtTime(s){const m=Math.floor(s/60),ss=(s%60);return`${m}:${ss<10?'0':''}${ss.toFixed(1)}`;}
+
+function neonText(txt,x,y,size,col,align='center',weight=900,blur=null){
+  ctx.save();
+  ctx.font=`${weight} ${size}px "Arial Black","Hiragino Kaku Gothic ProN",sans-serif`;
+  ctx.textAlign=align; ctx.textBaseline='middle';
+  ctx.shadowColor=col; ctx.shadowBlur=blur==null?size*0.7:blur;
+  ctx.fillStyle=col; ctx.fillText(txt,x,y);
+  ctx.shadowBlur=size*0.25;
+  ctx.fillStyle='#ffffff'; ctx.globalAlpha=0.85; ctx.fillText(txt,x,y);
+  ctx.restore();
+}
+
+// ---------- ゾーン定義 ----------
+const ZONES=[
+ {name:'ネオンネビュラ',    d:0,    top:'#12042e', bot:'#3c0a5e', grid:'#ff2bd6', sun1:'#ffb300', sun2:'#ff2bd6', acc:'#00e5ff'},
+ {name:'アステロイドベルト', d:500,  top:'#1c0520', bot:'#5e1a0a', grid:'#ff9100', sun1:'#ffd000', sun2:'#ff3d00', acc:'#ffd54f'},
+ {name:'リングワールド',    d:1500, top:'#020b2e', bot:'#0a3a5e', grid:'#00e5ff', sun1:'#80ffea', sun2:'#0091ff', acc:'#ff2bd6'},
+ {name:'デブリハイウェイ',  d:3000, top:'#04180d', bot:'#0a4a2e', grid:'#00ffb3', sun1:'#ccff00', sun2:'#00e676', acc:'#ff5252'},
+ {name:'ワームホールゾーン', d:5000, top:'#14001f', bot:'#4a0a6e', grid:'#c400ff', sun1:'#ff80ff', sun2:'#7c4dff', acc:'#00e5ff'},
+];
+
+// ---------- 小ネタテキスト ----------
+const ADS=[
+ '銀河ローンなら誰でも通ります(たぶん)','脳内チップ、今月まで半額','第7惑星、住民税値上げのお知らせ',
+ '本日のスモッグ濃度:おいしい','ネオン・バーガー(株)— 味は法的にセーフ','ワープ保険、加入は光速で',
+ '求人:ブラックホール監視員(帰宅保証なし)','月面リゾート、重力はオプションです','偽物にご注意(当社も偽物です)',
+];
+const HITCH_SIGNS=['地球行き(ヒューストン経由)','第九惑星まで乗せてくれ','お金は無いが話は面白い','どこでもいい 早く','タオル持参済み'];
+const PROTEST_SIGNS=['税金反対','第三の目に自由を','グリッドの著作権を市民へ','月曜日の廃止を要求する'];
+const VENDOR_LINES=['怪しい違法ドローンいかがっすか','偽ワープ装置、動作未確認','安いよ安いよ(理由は聞くな)'];
+const MENUS=['銀河バーガー','ブラックホール・コーヒー','メテオポテト','ネビュラシェイク','ワームホールドッグ','暗黒物質ラーメン'];
+const MENU_GAG={'ブラックホール・コーヒー':'おかわり自由・出てこられない','銀河バーガー':'肉の惑星は非公開','メテオポテト':'落下速度で揚げました','ネビュラシェイク':'成分:ほぼ星雲','ワームホールドッグ':'どこか別の店に届くことがあります','暗黒物質ラーメン':'麺は観測できません'};
+
+// ---------- サウンド ----------
+let AC=null, master=null;
+const bgm={next:0,step:0};
+function initAudio(){
+  if(AC)return;
+  try{
+    AC=new (window.AudioContext||window.webkitAudioContext)();
+    master=AC.createGain(); master.gain.value=0.42; master.connect(AC.destination);
+    bgm.next=AC.currentTime+0.1;
+  }catch(e){AC=null;}
+}
+function tone(f,dur,type='square',v=0.18,when=0,slide=0){
+  if(!AC)return;
+  const t0=(when||AC.currentTime);
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.type=type;o.frequency.setValueAtTime(f,t0);
+  if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(20,f+slide),t0+dur);
+  g.gain.setValueAtTime(v,t0);g.gain.exponentialRampToValueAtTime(0.001,t0+dur);
+  o.connect(g);g.connect(master);o.start(t0);o.stop(t0+dur+0.02);
+}
+function noiseSE(dur,v=0.25,freq=1200,when=0){
+  if(!AC)return;
+  const t0=(when||AC.currentTime);
+  const len=Math.max(1,(AC.sampleRate*dur)|0);
+  const buf=AC.createBuffer(1,len,AC.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<len;i++)d[i]=Math.random()*2-1;
+  const s=AC.createBufferSource();s.buffer=buf;
+  const f=AC.createBiquadFilter();f.type='lowpass';f.frequency.value=freq;
+  const g=AC.createGain();g.gain.setValueAtTime(v,t0);g.gain.exponentialRampToValueAtTime(0.001,t0+dur);
+  s.connect(f);f.connect(g);g.connect(master);s.start(t0);s.stop(t0+dur);
+}
+const SE={
+  coin(){tone(880,0.07,'square',0.12);tone(1318,0.09,'square',0.12,AC?AC.currentTime+0.05:0);},
+  rare(){[880,1108,1318,1760].forEach((f,i)=>tone(f,0.12,'square',0.14,AC?AC.currentTime+i*0.07:0));},
+  power(){tone(220,0.35,'sawtooth',0.16,0,700);},
+  hit(){noiseSE(0.3,0.35,900);tone(110,0.3,'square',0.2,0,-60);},
+  fail(){tone(160,0.35,'sawtooth',0.18,0,-90);},
+  success(){[659,830,988].forEach((f,i)=>tone(f,0.12,'square',0.15,AC?AC.currentTime+i*0.08:0));},
+  rocket(){noiseSE(0.4,0.2,2500);tone(300,0.35,'sawtooth',0.1,0,500);},
+  boom(){noiseSE(0.6,0.45,350);tone(55,0.5,'sine',0.35,0,-20);},
+  zone(){[523,659,784,1046].forEach((f,i)=>tone(f,0.16,'triangle',0.16,AC?AC.currentTime+i*0.09:0));},
+  theremin(){const f=pick([440,494,554,659]);tone(f,0.5,'sine',0.1,0,rnd(-80,120));},
+  fanfare(){[523,659,784,1046,1318,1046,1568].forEach((f,i)=>tone(f,0.22,'square',0.15,AC?AC.currentTime+i*0.13:0));},
+};
+const BASS=[0,0,12,0,3,3,15,3,5,5,17,5,3,3,7,10]; // A minor風
+function updateBGM(){
+  if(!AC||G.state==='title')return;
+  const bpm=100+G.zoneIdx*9+(G.pw.boost>0?18:0);
+  const spb=60/bpm/2;
+  while(bgm.next<AC.currentTime+0.15){
+    const st=bgm.step;
+    const f=55*Math.pow(2,BASS[st]/12);
+    tone(f,spb*0.9,'sawtooth',0.09,bgm.next);
+    if(st%2===1)noiseSE(0.03,0.05,7000,bgm.next);          // ハット
+    if(st%8===0)tone(90,0.12,'sine',0.3,bgm.next,-50);      // キック
+    if(st%8===4)noiseSE(0.1,0.12,1500,bgm.next);            // スネア
+    if(st===0&&Math.random()<0.5)tone(f*4,spb*1.8,'triangle',0.05,bgm.next); // きらめき
+    bgm.step=(bgm.step+1)%16;
+    bgm.next+=spb;
+  }
+}
+
+// ---------- 永続データ ----------
+function loadLS(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}}
+function saveLS(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+let best={score:loadLS('rgd_best_score',0),dist:loadLS('rgd_best_dist',0),t42:loadLS('rgd_best_t42',null)};
+
+// ---------- ゲーム状態 ----------
+const G={};
+function reset(){
+  G.state='title';           // title / playing / answer / gameover
+  G.time=0; G.dist=0; G.score=0;
+  G.speed=0.42;
+  G.zoneIdx=0; G.zoneNoMiss=true; G.zoneFx=0; G.zoneFxName=''; G.zoneFxBonus=false;
+  G.col={top:h2r(ZONES[0].top),bot:h2r(ZONES[0].bot),grid:h2r(ZONES[0].grid),sun1:h2r(ZONES[0].sun1),sun2:h2r(ZONES[0].sun2),acc:h2r(ZONES[0].acc)};
+  G.gridOff=0;
+  G.player={lane:0,laneF:0,hp:3,inv:0,shield:false,dead:false,deathT:0};
+  G.pw={boost:0,magnet:0,slow:0};
+  G.obs=[]; G.items=[]; G.props=[]; G.groups=[]; G.rockets=[]; G.parts=[]; G.fw=[]; G.texts=[];
+  G.rings=[]; G.timers=[]; G.hitStop=0;
+  G.obsTimer=1.6; G.itemTimer=1.0; G.puTimer=rnd(10,15); G.propTimer=0.3; G.evtTimer=rnd(7,13);
+  G.nextLamp=60; G.nextGate=250;
+  G.crystalRun=null;
+  G.nextDT=380; G.nextBld=900;
+  G.combo=0;
+  G.shake=0; G.flash=0; G.flashCol='#ffffff'; G.glitch=0; G.slowPenalty=0;
+  G.answered=false; G.bonus=false; G.t42=null; G.fx42=0; G.finaleTimer=0;
+  G.caption=null; G.adX=W;
+  G.superNova=null; G.holo=null; G.chase=null; G.pBoomCyc=-1;
+  G.newRec={score:false,t42:false};
+  G.starSeed=Math.random()*1000;
+}
+reset();
+
+// 星空(固定)
+const STARS=[]; for(let i=0;i<220;i++)STARS.push({x:Math.random()*W,y:Math.random()*(VPY-30),r:rnd(0.5,1.8),p:Math.random()*6});
+// 地平線のメガロポリス・スカイライン(2層・ラスベガス風・中央=サン付近は低めに)
+const SIGN_V=['カジノ','ホテル','バー42','ネオン','クラブ','スシ'];
+const SIGN_R=['銀河カジノ','HOTEL COSMOS','WELCOME','スロット42','LIVE ALIENS','BUFFET∞'];
+const NEONC=['#ff2bd6','#00e5ff','#ffd54f','#ff9100','#c400ff','#00ffb3'];
+const SKY_BLD=[];
+{ // 奥のレイヤー(淡く高い)
+  let sx=-12;
+  while(sx<W){
+    const bw=rnd(34,86);
+    const cap=0.35+Math.min(1,Math.abs(sx+bw/2-W/2)/400)*0.65;
+    SKY_BLD.push({x:sx,w:bw,h:rnd(40,120)*cap,layer:0,seed:Math.random()*100,style:0});
+    sx+=bw+rnd(-10,16);
+  }
+  // 手前のレイヤー(濃く、ネオン装飾つき)
+  sx=-8;
+  while(sx<W){
+    const bw=rnd(24,62);
+    const cap=0.3+Math.min(1,Math.abs(sx+bw/2-W/2)/340)*0.7;
+    const r=Math.random();
+    const style=r<0.20?0:r<0.32?1:r<0.44?2:r<0.53?3:r<0.68?4:r<0.82?5:r<0.89?6:r<0.95?7:8;
+    SKY_BLD.push({
+      x:sx,w:bw,h:rnd(30,100)*cap,layer:1,seed:Math.random()*100,style,
+      col:pick(NEONC),
+      text:style===4?pick(SIGN_V):style===5?pick(SIGN_R):null,
+    });
+    sx+=bw+rnd(3,22);
+  }
+}
+
+// ---------- スコア ----------
+function addScore(n,label,x,y,col){
+  if(G.answered||n<=0)return;
+  const before=G.score;
+  G.score=Math.min(42,G.score+n);
+  const got=G.score-before;
+  if(label&&got>0)G.texts.push({x:x||W/2,y:y||H-200,txt:`+${got} ${label}`,col:col||'#00e5ff',life:1.2});
+  if(G.score===42)trigger42();
+}
+function trigger42(){
+  // ゲームは止めない:テキスト演出+ボーナスフライトへシームレス移行
+  G.answered=true; G.bonus=true; G.fx42=6;
+  G.t42=G.time; G.flash=0.8; G.flashCol='#ffffff';
+  if(best.t42==null||G.t42<best.t42){best.t42=G.t42;saveLS('rgd_best_t42',best.t42);G.newRec.t42=true;}
+  if(G.score>best.score){best.score=G.score;saveLS('rgd_best_score',best.score);}
+  SE.fanfare();
+  for(let i=0;i<8;i++)setTimeout(()=>spawnFirework(2.2),i*300);
+  G.caption={txt:'ボーナスフライト:答えは出た。あとは飛ぶだけ。',t:6};
+}
+
+// ---------- 花火 ----------
+function spawnFirework(scale){
+  scale=scale||(0.6+G.score/42*1.2);
+  G.fw.push({x:rnd(60,W-60),y:VPY-rnd(40,150),t:0,scale,col:pick(['#ff2bd6','#00e5ff','#ffd54f','#7c4dff','#00ffb3'])});
+}
+function updateFireworks(dt){
+  for(let i=G.fw.length-1;i>=0;i--){
+    const f=G.fw[i]; f.t+=dt;
+    if(f.t>0.4&&!f.burst){
+      f.burst=true;
+      const n=(18*f.scale)|0;
+      for(let k=0;k<n;k++){
+        const a=k/n*Math.PI*2, sp=rnd(40,110)*f.scale;
+        G.parts.push({x:f.x,y:f.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:rnd(0.6,1.3),col:f.col,size:rnd(1.5,3),grav:22,add:true});
+      }
+    }
+    if(f.t>0.5)G.fw.splice(i,1);
+  }
+}
+
+// ---------- スポーン ----------
+function spawnObstacle(){
+  const z=G.zoneIdx;
+  const pool=[['ast'],['ast','ast','spin','band'],['ast','spin','band','band'],['ast','spin','band','ufo','laser'],['ast','spin','band','ufo','laser','band']][z];
+  const type=pick(pool);
+  if(type==='band'){
+    // 壁: 1〜2レーンだけ空けて塞ぐ(序盤は必ず2レーン空く)
+    const g1=ri(-2,2);
+    const g2=(z>=2&&Math.random()<0.4)?g1:((g1+2+ri(1,4))%5)-2;
+    for(let l=-2;l<=2;l++)if(l!==g1&&l!==g2)G.obs.push({type:z>=3?'debris':'ast',t:0,laneF:l,rot:rnd(0,6),spin:rnd(-1,1),hit:false,mul:1});
+  }else if(type==='laser'){
+    G.obs.push({type:'laser',t:0,laneF:0,phase:rnd(0,1),hit:false,mul:1});
+  }else if(type==='ufo'){
+    const l=ri(-2,2);
+    G.obs.push({type:'ufo',t:0,laneF:l,target:l,retime:1,hit:false,mul:0.85});
+  }else{
+    const n=1+(z>=1?ri(0,1):0)+(z>=3?ri(0,1):0);
+    const used=new Set();
+    for(let i=0;i<n;i++){
+      const l=ri(-2,2);
+      if(used.has(l))continue;
+      used.add(l);
+      G.obs.push({type,t:0,laneF:l,rot:rnd(0,6),spin:type==='spin'?rnd(2,4)*(Math.random()<0.5?-1:1):rnd(-0.5,0.5),hit:false,mul:1});
+    }
+  }
+}
+function spawnItem(){
+  if(!G.crystalRun&&Math.random()<0.8){
+    G.crystalRun={lane:ri(-2,2),n:ri(3,5),timer:0};
+  }
+}
+function spawnPowerup(){
+  const r=Math.random();
+  let type;
+  if(r<0.04)type='rare';
+  else type=pick(['shield','boost','magnet','slow','mystery']);
+  G.items.push({type,t:0,laneF:ri(-2,2),got:false,rot:0});
+}
+// ゾーンごとの路肩シーナリー(ドライブの景色が変わる)
+const ZONE_SCENERY=[
+  ['palm','palm','crys','flower','flower','billboard','lantern','ruin'],       // ネオンネビュラ
+  ['rock','rock','arch','vent','rig','crys','rock','billboard'],               // アステロイドベルト
+  ['ringpost','arcgate','orb','statue','palm','ringpost','lantern'],           // リングワールド
+  ['junk','wreck','scraptower','firebarrel','warnsign','junk','billboard'],    // デブリハイウェイ
+  ['obelisk','portal','shard','tether','crys','obelisk','lantern'],            // ワームホールゾーン
+];
+const CLUSTER=new Set(['crys','rock','flower','junk','shard','lantern']);
+const BILLS=['モーテル42 空室あり','中古UFO 3台限り','宇宙ラーメン 24h','ネオン整備工場','燃料+電池+夢','保険『たぶん大丈夫』'];
+function spawnProp(){
+  if(G.props.length>90)return; // 描画負荷の上限
+  const scenery=Math.random()<0.7;
+  const type=scenery?pick(ZONE_SCENERY[G.zoneIdx]):pick(['hitch','hitch','jog','music','protest','vendor','pet','robot']);
+  const side=Math.random()<0.5?-1:1;
+  const far=scenery&&Math.random()<0.4;
+  const baseX=side*(far?rnd(520,680):rnd(370,560));
+  const mk=(xo)=>{
+    const p={type,t:0,xoff:xo,side,seen:false,ph:rnd(0,6),big:Math.random()<0.22};
+    if(type==='hitch')p.line=pick(HITCH_SIGNS);
+    if(type==='protest')p.line=pick(PROTEST_SIGNS);
+    if(type==='vendor')p.line=pick(VENDOR_LINES);
+    if(type==='billboard')p.line=pick(BILLS);
+    G.props.push(p);
+  };
+  if(scenery&&CLUSTER.has(type)){
+    const n=ri(2,4);
+    for(let i=0;i<n;i++)mk(baseX+rnd(-80,80));
+  }else mk(baseX);
+}
+function spawnLampPair(){ // 街灯(左右対・道沿いに連続)
+  for(const side of [-1,1])G.props.push({type:'lamp',t:0,xoff:side*(ROAD_EDGE+55),side,seen:true,ph:0});
+}
+function spawnGate(){ // 道をまたぐ巨大ネオンゲート
+  G.props.push({type:'gate',t:0,xoff:0,side:1,seen:true,ph:0,line:ZONES[G.zoneIdx].name});
+}
+function spawnDriveThru(){
+  // 店は道路脇に建ち、接している端レーン(±2)だけが受け取りレーン
+  const side=Math.random()<0.5?-1:1;
+  const menu=pick(MENUS);
+  const fast=G.dist>2500&&Math.random()<0.5;
+  G.groups.push({kind:'dt',t:0,side,correct:side*2,menu,judged:false,fast});
+  G.caption=fast
+    ?{txt:'前方に高速ドライブスルー! 店がどちら側かは直前まで不明…',t:3}
+    :{txt:`前方にドライブスルー(${side<0?'左':'右'}側)! お店に接するレーンへ`,t:3};
+}
+function spawnBuilding(){
+  G.groups.push({kind:'bld',t:0,fired:false,exploded:false,expT:0,name:pick(['ネオン・バーガー(株)本社','銀河複合企業 第3支社','怪しい税務署(自称)','旧・脳内チップ工場'])});
+}
+function spawnEvent(){
+  const r=Math.random();
+  if(r<0.3){G.superNova={x:rnd(40,W-40),y:rnd(20,VPY-80),t:0};G.caption={txt:'遠くの星がひとつ終わった。宇宙は今日も通常営業。',t:3.5};}
+  else if(r<0.55){G.chase={t:0};G.caption={txt:'警察UFOに追われている宇宙人が横切っていった',t:3};}
+  else if(r<0.8){G.holo={txt:pick(ADS),t:0};}
+  else{G.props.push({type:'bdance',t:0,xoff:(Math.random()<0.5?-1:1)*rnd(380,560),seen:false,ph:0,line:'路肩でUFOがブレイクダンスしている'});}
+}
+
+// ---------- 判定・効果 ----------
+function playerHit(){
+  const p=G.player;
+  if(G.bonus||p.inv>0||p.dead)return;
+  if(p.shield){
+    p.shield=false; p.inv=1.2; G.flash=0.4; G.flashCol='#00e5ff';
+    G.texts.push({x:W/2,y:H-220,txt:'シールドが守った!',col:'#00e5ff',life:1.2});
+    SE.power(); return;
+  }
+  p.hp--; p.inv=1.6; G.shake=0.6; G.flash=0.5; G.flashCol='#ff2b4e'; G.zoneNoMiss=false;
+  SE.hit();
+  if(p.hp<=0){
+    p.dead=true; p.deathT=0;
+    for(let k=0;k<40;k++){
+      const a=rnd(0,6.28),sp=rnd(30,200);
+      G.parts.push({x:playerX(),y:playerY(),vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:rnd(0.5,1.4),col:pick(['#ff2bd6','#00e5ff','#ffffff','#ffd54f']),size:rnd(2,4),grav:120,add:true});
+    }
+    SE.boom();
+  }
+}
+function collectItem(it){
+  it.got=true;
+  const px=playerX(),py=playerY()-40;
+  switch(it.type){
+    case 'crystal':{const v=G.pw.boost>0?2:1;addScore(v,'結晶',px,py);SE.coin();break;}
+    case 'rare':addScore(6,'レア結晶!!',px,py,'#ffd54f');SE.rare();spawnFirework();break;
+    case 'shield':G.player.shield=true;G.texts.push({x:px,y:py,txt:'シールド',col:'#00e5ff',life:1.2});SE.power();break;
+    case 'boost':G.pw.boost=6;G.texts.push({x:px,y:py,txt:'ブースト! 結晶×2',col:'#ff9100',life:1.2});SE.power();break;
+    case 'magnet':G.pw.magnet=8;G.texts.push({x:px,y:py,txt:'マグネット',col:'#ff2bd6',life:1.2});SE.power();break;
+    case 'slow':G.pw.slow=5;G.texts.push({x:px,y:py,txt:'スローモーション',col:'#7c4dff',life:1.2});SE.power();break;
+    case 'mystery':{
+      const sub=pick(['shield','boost','magnet','slow','crystals']);
+      if(sub==='crystals'){addScore(3,'ミステリー:結晶×3',px,py,'#ffd54f');}
+      else{collectItem({type:sub,got:true});G.texts.push({x:px,y:py-24,txt:'ミステリーボックス!',col:'#ffd54f',life:1});}
+      SE.rare();break;
+    }
+  }
+  for(let k=0;k<8;k++){const a=rnd(0,6.28);G.parts.push({x:px,y:py+20,vx:Math.cos(a)*60,vy:Math.sin(a)*60,life:0.4,col:'#00e5ff',size:2,grav:0,add:true});}
+}
+function judgeDriveThru(g){
+  g.judged=true;
+  if(G.player.lane===g.correct){
+    G.combo++;
+    addScore(3,`ドライブスルー成功「${g.menu}」`,W/2,H-240,'#00ffb3');
+    if(G.combo%3===0)addScore(1,`コンボ×${G.combo}!`,W/2,H-270,'#ffd54f');
+    spawnFirework();spawnFirework(); SE.success();
+    // 紙吹雪
+    for(let k=0;k<30;k++){
+      G.parts.push({x:W/2+rnd(-260,260),y:H*0.3+rnd(-50,50),vx:rnd(-70,70),vy:rnd(-50,40),life:rnd(0.7,1.4),col:pick(NEONC),size:rnd(2.5,4.5),grav:170,add:true});
+    }
+    G.caption={txt:`店員「${g.menu}お待ち!(${MENU_GAG[g.menu]||'当店は無実です'})」`,t:3.5};
+  }else{
+    G.combo=0; G.glitch=0.6; G.slowPenalty=1.2; SE.fail();
+    G.texts.push({x:W/2,y:H-240,txt:'注文ミス…(店員の目が全部こっちを見た)',col:'#ff5252',life:1.6});
+  }
+}
+
+function playerX(){return proj(PT,G.player.laneF*LANE_W).x;} // レーンと同じ投影(視差カメラ込み)
+function playerY(){return VPY+(BOTY-VPY)*ease(PT)-30;}
+
+// ---------- 更新 ----------
+let last=performance.now();
+function update(dt){
+  updateBGM();
+  if(G.state==='title'){G.gridOff=(G.gridOff+dt*0.25)%1;G.time+=dt;return;}
+  if(G.state==='gameover'){updateParticles(dt);updateFireworks(dt);return;}
+  if(G.hitStop>0){G.hitStop-=dt;dt*=0.12;} // 爆発の瞬間のスローモーション
+
+  const p=G.player;
+  if(p.dead){
+    p.deathT+=dt;updateParticles(dt);
+    G.shake=Math.max(0,G.shake-dt);
+    if(p.deathT>1.4){
+      G.state='gameover';
+      if(G.score>best.score){best.score=G.score;saveLS('rgd_best_score',best.score);G.newRec.score=true;}
+      if(G.dist>best.dist){best.dist=G.dist;saveLS('rgd_best_dist',best.dist);}
+    }
+    return;
+  }
+
+  G.time+=dt;
+  // スピード(徐々に上昇/ペナルティ減速)
+  const base=0.42+Math.min(G.dist/9000,0.5)+G.zoneIdx*0.035;
+  const pen=G.slowPenalty>0?0.55:1;
+  G.speed=lerp(G.speed,base*pen,dt*3);
+  G.slowPenalty=Math.max(0,G.slowPenalty-dt);
+  G.dist+=G.speed*130*dt;
+  G.gridOff=(G.gridOff+G.speed*dt*1.4)%1;
+
+  // ゾーン遷移
+  let zi=0;for(let i=0;i<ZONES.length;i++)if(G.dist>=ZONES[i].d)zi=i;
+  if(zi!==G.zoneIdx){
+    const prev=ZONES[G.zoneIdx].name;
+    G.zoneIdx=zi;
+    G.zoneFx=2.6;G.zoneFxName=prev;G.zoneFxBonus=false;
+    if(G.zoneNoMiss){addScore(2,'ノーミスゾーンクリア!');G.zoneFxBonus=true;}
+    G.zoneNoMiss=true;
+    G.flash=0.5;G.flashCol='#ffffff';
+    spawnFirework(1.6);spawnFirework(1.6);spawnFirework(2);spawnFirework(2);SE.zone();
+  }
+  const zc=ZONES[G.zoneIdx];
+  for(const k of ['top','bot','grid','sun1','sun2','acc'])G.col[k]=mixc(G.col[k],h2r(zc[k]),Math.min(1,dt*1.5));
+  G.zoneFx=Math.max(0,G.zoneFx-dt);
+
+  // タイマー減衰
+  p.inv=Math.max(0,p.inv-dt);
+  G.pw.boost=Math.max(0,G.pw.boost-dt);
+  G.pw.magnet=Math.max(0,G.pw.magnet-dt);
+  G.pw.slow=Math.max(0,G.pw.slow-dt);
+  G.shake=Math.max(0,G.shake-dt*1.5);
+  G.flash=Math.max(0,G.flash-dt*2);
+  G.glitch=Math.max(0,G.glitch-dt);
+  G.fx42=Math.max(0,G.fx42-dt);
+  if(G.caption){G.caption.t-=dt;if(G.caption.t<=0)G.caption=null;}
+  G.adX-=dt*80;if(G.adX<-3200)G.adX=W;
+
+  // レーン移動(表示&判定用の補間)
+  p.laneF=lerp(p.laneF,p.lane,Math.min(1,dt*12));
+  // エンジントレイル(常時キラキラ)
+  if(!p.dead){
+    G.parts.push({x:playerX()+rnd(-16,16),y:playerY()+16,vx:rnd(-10,10),vy:rnd(50,110),life:rnd(0.25,0.45),col:G.bonus?'#ffd54f':(G.pw.boost>0?'#ff9100':pick(['#00e5ff','#ff2bd6'])),size:rnd(1.5,3.2),grav:0,add:true});
+  }
+
+  // ---- スポーン ----
+  const groupActive=G.groups.some(g=>g.t<1.05);
+  G.obsTimer-=dt;
+  if(G.obsTimer<=0&&!groupActive&&!G.bonus){
+    spawnObstacle();
+    G.obsTimer=rnd(0.9,1.6)*Math.max(0.45,1-G.zoneIdx*0.12)/(0.6+G.speed);
+  }
+  G.itemTimer-=dt;
+  if(G.itemTimer<=0){spawnItem();G.itemTimer=rnd(2.5,4.5);}
+  if(G.crystalRun){
+    G.crystalRun.timer-=dt;
+    if(G.crystalRun.timer<=0){
+      G.items.push({type:'crystal',t:0,laneF:G.crystalRun.lane,got:false,rot:0});
+      G.crystalRun.n--;G.crystalRun.timer=0.35/(0.6+G.speed);
+      if(G.crystalRun.n<=0)G.crystalRun=null;
+    }
+  }
+  G.puTimer-=dt;
+  if(G.puTimer<=0){spawnPowerup();G.puTimer=rnd(10,16);}
+  G.propTimer-=dt;
+  if(G.propTimer<=0){spawnProp();G.propTimer=rnd(0.18,0.45);}
+  if(G.dist>G.nextLamp){spawnLampPair();G.nextLamp=G.dist+130;}
+  if(G.dist>G.nextGate){spawnGate();G.nextGate=G.dist+rnd(700,900);}
+  G.evtTimer-=dt;
+  if(G.evtTimer<=0){spawnEvent();G.evtTimer=rnd(9,16);}
+  if(!G.bonus){
+    if(G.dist>G.nextDT&&!groupActive){spawnDriveThru();G.nextDT=G.dist+rnd(550,750);}
+    if(G.dist>G.nextBld&&G.zoneIdx>=1&&!groupActive){if(Math.random()<0.6)spawnBuilding();G.nextBld=G.dist+rnd(900,1400);}
+  }
+  if(G.bonus){if(Math.random()<dt*0.8)spawnFirework(1.5);}
+
+  // ---- 障害物更新 ----
+  const slowMul=G.pw.slow>0?0.45:1;
+  for(let i=G.obs.length-1;i>=0;i--){
+    const o=G.obs[i];
+    o.t+=G.speed*(0.15+o.t)*dt*(o.mul||1)*slowMul;
+    if(o.rot!=null)o.rot+=(o.spin||0)*dt;
+    if(o.type==='ufo'){
+      o.retime-=dt;
+      if(o.retime<=0){o.target=clamp(Math.round(o.laneF)+ri(-1,1),-2,2);o.retime=rnd(0.8,1.5);}
+      o.laneF=lerp(o.laneF,o.target,dt*1.8);
+    }
+    // 衝突
+    if(!o.hit&&o.t>0.84&&o.t<0.96&&!G.bonus){
+      let hit=false;
+      if(o.type==='laser'){
+        const on=((G.time*0.8+o.phase)%1)<0.5;
+        if(on)hit=true;
+      }else{
+        if(Math.abs(o.laneF-p.laneF)<0.5)hit=true;
+      }
+      if(hit){o.hit=true;playerHit();}
+    }
+    if(o.t>1.1)G.obs.splice(i,1);
+  }
+
+  // ---- アイテム更新 ----
+  for(let i=G.items.length-1;i>=0;i--){
+    const it=G.items[i];
+    it.t+=G.speed*(0.15+it.t)*dt;
+    it.rot+=dt*3;
+    if(G.pw.magnet>0&&it.type==='crystal'&&it.t>0.55)it.laneF=lerp(it.laneF,p.laneF,dt*6);
+    if(!it.got&&it.t>0.8&&it.t<0.98&&Math.abs(it.laneF-p.laneF)<0.55)collectItem(it);
+    if(it.t>1.05||it.got)G.items.splice(i,1);
+  }
+
+  // ---- 路肩プロップ ----
+  for(let i=G.props.length-1;i>=0;i--){
+    const pr=G.props[i];
+    pr.t+=G.speed*(0.15+pr.t)*dt;
+    pr.ph+=dt*3;
+    if(!pr.seen&&pr.t>0.8){
+      pr.seen=true;
+      if(pr.type==='hitch')G.caption={txt:`ヒッチハイク宇宙人『${pr.line}』`,t:3};
+      else if(pr.type==='protest')G.caption={txt:`デモ隊『${pr.line}』`,t:3};
+      else if(pr.type==='vendor')G.caption={txt:`露天商「${pr.line}」`,t:3};
+      else if(pr.type==='bdance')G.caption={txt:pr.line,t:3};
+      else if(pr.type==='music'){SE.theremin();}
+    }
+    if(pr.t>1.15)G.props.splice(i,1);
+  }
+
+  // ---- ドライブスルー/建造物 ----
+  for(let i=G.groups.length-1;i>=0;i--){
+    const g=G.groups[i];
+    g.t+=G.speed*(0.15+g.t)*dt*0.9;
+    if(g.kind==='dt'&&!g.judged&&g.t>0.86)judgeDriveThru(g);
+    if(g.kind==='bld'){
+      if(!g.fired&&g.t>0.42){
+        g.fired=true;
+        // 3連ロケット(左右はわずかに遅れて発射)
+        for(const xo of [-1,0,1])G.rockets.push({t:PT-0.03,xoff:xo*LANE_W*0.9,target:g,delay:Math.abs(xo)*0.13});
+        SE.rocket();
+        G.caption={txt:'障害物ビル検知 → ロケット3連発射(交渉は決裂しました)',t:3};
+      }
+      if(g.exploded)g.expT+=dt;
+      if(!g.exploded&&g.t>0.8){explodeBuilding(g);} // 保険:必ず爆破
+    }
+    if(g.t>1.1||(g.kind==='bld'&&g.exploded&&g.expT>1.5))G.groups.splice(i,1);
+  }
+
+  // ---- ロケット ----
+  for(let i=G.rockets.length-1;i>=0;i--){
+    const r=G.rockets[i];
+    if(r.delay>0){r.delay-=dt;continue;}
+    r.t-=dt*0.6;
+    r.xoff=lerp(r.xoff||0,0,dt*2.5); // 中央へ収束
+    const pos=proj(r.t,r.xoff||0);
+    // 炎と煙の尾
+    for(let k=0;k<2;k++){
+      G.parts.push({x:pos.x+rnd(-4,4),y:pos.y-14*pos.s,vx:rnd(-14,14),vy:rnd(40,110),life:rnd(0.25,0.5),col:pick(['#ff9100','#ffd54f','#ffffff']),size:rnd(2,4.5),grav:0,add:true});
+    }
+    if(Math.random()<0.6)G.parts.push({x:pos.x+rnd(-5,5),y:pos.y-8*pos.s,vx:rnd(-8,8),vy:rnd(15,40),life:rnd(0.5,0.9),col:'#667',size:rnd(3,6),grav:-15,add:false});
+    if(r.target&&r.t<=r.target.t+0.02){
+      if(!r.target.exploded)explodeBuilding(r.target);
+      else secondaryBoom(pos.x+rnd(-40,40),pos.y-rnd(10,60)*pos.s,pos.s);
+      G.rockets.splice(i,1);
+    }else if(r.t<0){G.rockets.splice(i,1);}
+  }
+  // ---- 二次爆発タイマー ----
+  for(let i=G.timers.length-1;i>=0;i--){
+    const tm=G.timers[i];
+    tm.t-=dt;
+    if(tm.t<=0){G.timers.splice(i,1);secondaryBoom(tm.x,tm.y,tm.sc);}
+  }
+  // ---- 衝撃波リング ----
+  for(let i=G.rings.length-1;i>=0;i--){
+    const rg2=G.rings[i];
+    rg2.r+=rg2.vr*dt;
+    rg2.vr*=Math.pow(0.35,dt);
+    rg2.life-=dt;
+    if(rg2.life<=0)G.rings.splice(i,1);
+  }
+
+  // ---- 追跡イベント ----
+  if(G.chase){
+    G.chase.t+=dt*0.7;
+    if(G.chase.t>1.4)G.chase=null;
+  }
+  if(G.superNova){G.superNova.t+=dt;if(G.superNova.t>3)G.superNova=null;}
+  if(G.holo){G.holo.t+=dt;if(G.holo.t>2.5)G.holo=null;}
+
+  updateParticles(dt);
+  updateFireworks(dt);
+  for(let i=G.texts.length-1;i>=0;i--){const t=G.texts[i];t.life-=dt;t.y-=dt*40;if(t.life<=0)G.texts.splice(i,1);}
+}
+function explodeBuilding(g){
+  g.exploded=true;g.expT=0;
+  const pos=proj(g.t,0);
+  const cx2=pos.x,cy2=pos.y-50*pos.s;
+  G.shake=1.6;G.flash=1;G.flashCol='#ffd9a0';G.hitStop=0.13; // ヒットストップで衝撃を演出
+  SE.boom();
+  // 衝撃波リング(3重)
+  for(let i=0;i<3;i++)G.rings.push({x:cx2,y:cy2,r:12+i*24,vr:560-i*130,life:0.75+i*0.15,col:i===0?'#ffffff':(i===1?'#ffd54f':'#ff9100'),lw:8-i*2});
+  // 巨大火球(上昇しながら膨らむ)
+  for(let k=0;k<16;k++){
+    const a=rnd(0,6.28),sp=rnd(15,100)*pos.s;
+    G.parts.push({x:cx2+rnd(-110,110)*pos.s,y:cy2-rnd(-20,90)*pos.s,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-50*pos.s,life:rnd(0.5,1),col:pick(['#ffd54f','#ff9100','#ff5222','#ffffff']),size:rnd(16,34)*pos.s,grav:-40,add:true,fire:true});
+  }
+  // 瓦礫(大量・重力で降り注ぐ)
+  for(let k=0;k<80;k++){
+    const a=rnd(0,6.28),sp=rnd(60,460)*pos.s;
+    G.parts.push({x:cx2+rnd(-100,100)*pos.s,y:cy2-rnd(0,100)*pos.s,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-90*pos.s,life:rnd(0.5,1.6),col:pick(['#ff9100','#ffd54f','#ff2b4e','#8899aa','#ffffff','#c8a2ff']),size:rnd(2,6)*pos.s,grav:340,add:true});
+  }
+  // 白熱スパーク(高速で細長い)
+  for(let k=0;k<30;k++){
+    const a=rnd(0,6.28),sp=rnd(300,700)*pos.s;
+    G.parts.push({x:cx2,y:cy2,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp*0.6,life:rnd(0.2,0.45),col:pick(['#ffffff','#ffd54f']),size:rnd(1.5,3),grav:0,add:true});
+  }
+  // 二次爆発(時間差でドカン×3)
+  for(let i=1;i<=3;i++)G.timers.push({t:0.16*i+rnd(0,0.08),x:cx2+rnd(-140,140)*pos.s,y:cy2-rnd(-20,110)*pos.s,sc:pos.s*(1.05-i*0.18)});
+  G.caption={txt:`「${g.name}」は瓦礫になった。株価は逆に上がった。`,t:3.5};
+}
+function secondaryBoom(x,y,sc){
+  G.shake=Math.max(G.shake,0.6);G.flash=Math.max(G.flash,0.4);G.flashCol='#ffd9a0';
+  G.rings.push({x,y,r:8,vr:420,life:0.5,col:'#ffd54f',lw:5});
+  for(let k=0;k<7;k++){
+    const a=rnd(0,6.28);
+    G.parts.push({x:x+rnd(-30,30),y:y+rnd(-20,20),vx:Math.cos(a)*rnd(10,60),vy:rnd(-70,-20),life:rnd(0.4,0.8),col:pick(['#ffd54f','#ff9100','#ff5222']),size:rnd(10,22)*Math.max(0.4,sc),grav:-30,add:true,fire:true});
+  }
+  for(let k=0;k<24;k++){
+    const a=rnd(0,6.28),sp=rnd(80,360);
+    G.parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp*0.7,life:rnd(0.3,0.9),col:pick(['#ff9100','#ffd54f','#ffffff','#8899aa']),size:rnd(2,5),grav:300,add:true});
+  }
+  SE.boom();
+}
+function updateParticles(dt){
+  for(let i=G.parts.length-1;i>=0;i--){
+    const q=G.parts[i];
+    q.life-=dt;q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=(q.grav||0)*dt;
+    if(q.life<=0)G.parts.splice(i,1);
+  }
+}
+
+// ---------- 描画 ----------
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  if(G.shake>0)ctx.translate(rnd(-1,1)*G.shake*10,rnd(-1,1)*G.shake*10);
+
+  drawSky();
+  drawFireworksLayer();
+  drawSun();
+  drawSkyline();
+  drawAdTicker();
+  drawGrid();
+  drawWorld();
+  drawHaze();
+  if(!G.player.dead||G.player.deathT<0.2)drawPlayer();
+  drawParticles();
+  drawRings();
+  drawSpeedStreaks();
+
+  ctx.restore();
+
+  drawHUD();
+  drawOverlays();
+  drawScanlines();
+  if(G.glitch>0)drawGlitch();
+}
+
+function drawSky(){
+  const g=ctx.createLinearGradient(0,0,0,VPY+80);
+  g.addColorStop(0,css(G.col.top));g.addColorStop(1,css(G.col.bot));
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,VPY+2);
+  // 地面側もグラデ
+  const g2=ctx.createLinearGradient(0,VPY,0,H);
+  g2.addColorStop(0,css(mixc(G.col.bot,[0,0,0],0.5)));g2.addColorStop(1,'#05010f');
+  ctx.fillStyle=g2;ctx.fillRect(0,VPY,W,H-VPY);
+  // 星
+  for(const s of STARS){
+    const tw=0.5+0.5*Math.sin(G.time*2+s.p);
+    ctx.fillStyle=`rgba(255,255,255,${0.25+0.5*tw})`;
+    ctx.fillRect(s.x,s.y,s.r,s.r);
+  }
+  // たまに流れ星(全ゾーン・光る尾つき)
+  {
+    const cyc=6.5, k=Math.floor(G.time/cyc), ph2=(G.time%cyc)/1.1;
+    if(ph2<1){
+      const sx0=rndSeeded(k*3.7)*W, sy0=15+rndSeeded(k*7.1)*110;
+      const dx=0.9,dy=0.36;
+      const hx=sx0+ph2*300*dx, hy=sy0+ph2*300*dy;
+      if(hy<VPY-10){
+        ctx.save();ctx.globalCompositeOperation='lighter';
+        const fade=Math.sin(ph2*Math.PI);
+        const grd4=ctx.createLinearGradient(hx,hy,hx-95*dx,hy-95*dy);
+        grd4.addColorStop(0,`rgba(220,240,255,${0.95*fade})`);
+        grd4.addColorStop(1,'rgba(120,180,255,0)');
+        ctx.strokeStyle=grd4;ctx.lineWidth=2.2;
+        ctx.shadowColor='#aaddff';ctx.shadowBlur=8*fade;
+        ctx.beginPath();ctx.moveTo(hx,hy);ctx.lineTo(hx-95*dx,hy-95*dy);ctx.stroke();
+        ctx.fillStyle=`rgba(255,255,255,${0.9*fade})`;
+        ctx.beginPath();ctx.arc(hx,hy,1.8,0,6.28);ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+  // 超新星
+  if(G.superNova){
+    const sn=G.superNova,a=sn.t<0.5?sn.t*2:Math.max(0,1-(sn.t-0.5)/2.5);
+    ctx.save();ctx.globalCompositeOperation='lighter';
+    const r=8+sn.t*30;
+    const gr=ctx.createRadialGradient(sn.x,sn.y,0,sn.x,sn.y,r);
+    gr.addColorStop(0,`rgba(255,255,255,${a})`);gr.addColorStop(0.4,`rgba(255,180,120,${a*0.7})`);gr.addColorStop(1,'rgba(255,100,50,0)');
+    ctx.fillStyle=gr;ctx.beginPath();ctx.arc(sn.x,sn.y,r,0,6.28);ctx.fill();
+    ctx.restore();
+  }
+  // ワームホールゾーンの渦
+  if(G.zoneIdx===4){
+    ctx.save();ctx.globalAlpha=0.35;ctx.strokeStyle=css(G.col.acc);ctx.lineWidth=1.5;
+    for(let i=0;i<5;i++){
+      ctx.beginPath();
+      ctx.arc(W/2,VPY-30,26+i*36,G.time*0.7+i,G.time*0.7+i+4.2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // 右上の環つき惑星: 周期的に隕石が直撃して爆発する(全ゾーン共通の背景コント)
+  {
+    const px4=W*0.82,py4=90;
+    const C=16, cyc=Math.floor(G.time/C), ph3=G.time%C, impact=9.0;
+    if(ph3<impact){
+      // 惑星(新品がフェードインして補充される)
+      const ap=Math.min(1,ph3/0.8);
+      ctx.save();ctx.globalAlpha=ap;
+      const pg=ctx.createRadialGradient(px4-14,py4-14,4,px4,py4,44);
+      pg.addColorStop(0,'rgba(255,150,220,0.8)');pg.addColorStop(1,'rgba(90,20,120,0.55)');
+      ctx.fillStyle=pg;ctx.beginPath();ctx.arc(px4,py4,44,0,6.28);ctx.fill();
+      ctx.strokeStyle='rgba(0,229,255,0.5)';ctx.lineWidth=3;
+      ctx.beginPath();ctx.ellipse(px4,py4,66,14,-0.3,0,6.28);ctx.stroke();
+      const ma=G.time*0.3;
+      ctx.fillStyle='rgba(200,220,255,0.8)';
+      ctx.beginPath();ctx.arc(px4+Math.cos(ma)*80,py4+Math.sin(ma)*20,6,0,6.28);ctx.fill();
+      ctx.restore();
+      // 衝突コースの隕石(直撃2.2秒前から・画面内を横切って向かう)
+      const inT=(ph3-(impact-2.2))/2.2;
+      if(inT>0){
+        const sx2=px4-520*(1-inT),sy2=py4-90*(1-inT);
+        ctx.save();ctx.globalCompositeOperation='lighter';
+        const g5=ctx.createLinearGradient(sx2,sy2,sx2-100,sy2-17);
+        g5.addColorStop(0,'rgba(255,240,200,1)');g5.addColorStop(0.4,'rgba(255,150,60,0.6)');g5.addColorStop(1,'rgba(255,80,20,0)');
+        ctx.strokeStyle=g5;ctx.lineWidth=3.5;
+        ctx.shadowColor='#ff9100';ctx.shadowBlur=14;
+        ctx.beginPath();ctx.moveTo(sx2,sy2);ctx.lineTo(sx2-100,sy2-17);ctx.stroke();
+        ctx.shadowBlur=0;
+        ctx.fillStyle='rgba(255,255,255,0.95)';
+        ctx.beginPath();ctx.arc(sx2,sy2,4.5,0,6.28);ctx.fill();
+        ctx.restore();
+      }
+    }else{
+      const bt=ph3-impact;
+      if(G.pBoomCyc!==cyc){ // 直撃の瞬間: 破片を撒いて一言
+        G.pBoomCyc=cyc;
+        if(G.state==='playing'){ // パーティクル更新はプレイ中のみ動くため
+          for(let k=0;k<36;k++){
+            const a=rnd(0,6.28),sp2=rnd(30,160);
+            G.parts.push({x:px4,y:py4,vx:Math.cos(a)*sp2,vy:Math.sin(a)*sp2*0.7,life:rnd(0.6,1.8),col:pick(['#ff80ff','#ffd54f','#ff9100','#ffffff','#c8a2ff']),size:rnd(1.5,3.5),grav:14,add:true});
+          }
+          if(!G.caption)G.caption={txt:'右上の惑星に隕石が直撃。惑星保険は未加入だった模様。',t:4};
+        }
+      }
+      if(bt<1.1){ // 閃光+衝撃波リング
+        ctx.save();ctx.globalCompositeOperation='lighter';
+        const fa=Math.max(0,1-bt/1.1);
+        const fg=ctx.createRadialGradient(px4,py4,0,px4,py4,60+bt*100);
+        fg.addColorStop(0,`rgba(255,255,255,${0.9*fa})`);
+        fg.addColorStop(0.4,`rgba(255,160,220,${0.5*fa})`);
+        fg.addColorStop(1,'rgba(255,80,180,0)');
+        ctx.fillStyle=fg;ctx.beginPath();ctx.arc(px4,py4,60+bt*100,0,6.28);ctx.fill();
+        ctx.strokeStyle=`rgba(255,220,255,${0.85*fa})`;ctx.lineWidth=3;
+        ctx.beginPath();ctx.arc(px4,py4,20+bt*140,0,6.28);ctx.stroke();
+        ctx.restore();
+      }
+      // 残骸: 割れて漂う輪と燃えるかけら
+      const ga=Math.max(0,1-bt/(C-impact));
+      ctx.save();ctx.globalAlpha=ga*0.8;
+      ctx.strokeStyle='rgba(0,229,255,0.45)';ctx.lineWidth=2.5;
+      ctx.beginPath();ctx.ellipse(px4,py4+bt*6,66,14,-0.3+bt*0.06,0.4,2.4);ctx.stroke();
+      ctx.beginPath();ctx.ellipse(px4,py4+bt*9,66,14,-0.3-bt*0.05,3.6,5.6);ctx.stroke();
+      ctx.fillStyle='rgba(255,150,80,0.85)';
+      for(let k=0;k<5;k++){
+        const aa=k*1.3+bt*0.4,rr3=26+k*9+bt*12;
+        ctx.beginPath();ctx.arc(px4+Math.cos(aa)*rr3,py4+Math.sin(aa)*rr3*0.6,2.2,0,6.28);ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+  // アステロイドベルト: 光る軌跡を引いて流れる隕石
+  if(G.zoneIdx===1){
+    ctx.save();ctx.globalCompositeOperation='lighter';
+    for(let i=0;i<6;i++){
+      const sp=90+(i*37)%80;
+      const dx=0.94,dy=0.34+((i*17)%10)*0.02;
+      const path=W+500;
+      const pr2=((G.time*sp)+i*713)%path-250;
+      const hx=pr2*dx+(i*89)%200;
+      const hy=18+(i*61)%110+pr2*dy*0.35;
+      if(hy>VPY-12||hx<-120)continue;
+      const tl=80+(i*23)%60;
+      // 発光する軌跡
+      const grd3=ctx.createLinearGradient(hx,hy,hx-tl*dx,hy-tl*dy*0.35);
+      grd3.addColorStop(0,'rgba(255,240,200,0.95)');
+      grd3.addColorStop(0.35,'rgba(255,150,60,0.55)');
+      grd3.addColorStop(1,'rgba(255,80,20,0)');
+      ctx.strokeStyle=grd3;ctx.lineWidth=3;
+      ctx.shadowColor='#ff9100';ctx.shadowBlur=12;
+      ctx.beginPath();ctx.moveTo(hx,hy);ctx.lineTo(hx-tl*dx,hy-tl*dy*0.35);ctx.stroke();
+      ctx.shadowBlur=0;
+      // 頭部の輝き+岩本体
+      const hg=ctx.createRadialGradient(hx,hy,0,hx,hy,9);
+      hg.addColorStop(0,'rgba(255,255,255,0.95)');hg.addColorStop(1,'rgba(255,140,40,0)');
+      ctx.fillStyle=hg;ctx.beginPath();ctx.arc(hx,hy,9,0,6.28);ctx.fill();
+      ctx.fillStyle='rgba(120,60,25,0.9)';
+      ctx.beginPath();ctx.arc(hx,hy,3.2,0,6.28);ctx.fill();
+    }
+    ctx.restore();
+    // 漂う岩のシルエット(奥行き用)
+    ctx.save();ctx.fillStyle='rgba(60,25,12,0.85)';ctx.strokeStyle='rgba(255,145,0,0.5)';ctx.lineWidth=1.5;
+    for(let i=0;i<4;i++){
+      const ax=(i*271+((G.time*6*(1+i%2))%300))%(W+80)-40;
+      const ay=45+(i*77)%140, ar=7+(i*13)%12;
+      ctx.beginPath();
+      for(let k=0;k<6;k++){const an=k/6*6.28;const rr2=ar*(0.7+0.3*rndSeeded(i*7+k));
+        k?ctx.lineTo(ax+Math.cos(an)*rr2,ay+Math.sin(an)*rr2*0.8):ctx.moveTo(ax+Math.cos(an)*rr2,ay+Math.sin(an)*rr2*0.8);}
+      ctx.closePath();ctx.fill();ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // デブリハイウェイ: 廃棄ステーションのシルエットとクレーン
+  if(G.zoneIdx===3){
+    ctx.save();ctx.strokeStyle='rgba(0,255,179,0.35)';ctx.fillStyle='rgba(5,15,10,0.9)';ctx.lineWidth=2;
+    for(const[cx2,sc]of[[W*0.14,1],[W*0.86,0.8]]){
+      ctx.beginPath();ctx.moveTo(cx2,VPY);ctx.lineTo(cx2,VPY-90*sc);ctx.lineTo(cx2+70*sc,VPY-70*sc);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx2+70*sc,VPY-70*sc);ctx.lineTo(cx2+70*sc,VPY-40*sc);ctx.stroke();
+      ctx.fillRect(cx2+58*sc,VPY-40*sc,24*sc,16*sc);ctx.strokeRect(cx2+58*sc,VPY-40*sc,24*sc,16*sc);
+      if((G.time*2|0)%2){ctx.fillStyle='#ff2b4e';ctx.fillRect(cx2-2,VPY-94*sc,4,4);ctx.fillStyle='rgba(5,15,10,0.9)';}
+    }
+    ctx.restore();
+  }
+  // リングワールドの輪
+  if(G.zoneIdx===2){
+    ctx.save();ctx.globalAlpha=0.5;ctx.strokeStyle=css(G.col.acc);ctx.lineWidth=6;
+    ctx.beginPath();ctx.ellipse(W/2,VPY-40,360,64,-0.18,Math.PI*1.05,Math.PI*1.95);ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawSun(){
+  const cx=W/2,cy=VPY-6,R=118;
+  ctx.save();
+  const g=ctx.createLinearGradient(0,cy-R,0,cy+R);
+  g.addColorStop(0,css(G.col.sun1));g.addColorStop(1,css(G.col.sun2));
+  ctx.shadowColor=css(G.col.sun2);ctx.shadowBlur=50;
+  ctx.beginPath();ctx.arc(cx,cy,R,Math.PI,0);ctx.closePath();
+  ctx.fillStyle=g;ctx.fill();
+  ctx.shadowBlur=0;
+  // 上半分も薄く
+  ctx.globalAlpha=0.9;ctx.beginPath();ctx.arc(cx,cy,R,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+  ctx.globalAlpha=1;
+  // シンセウェイブ・スリット
+  ctx.globalCompositeOperation='destination-out';
+  for(let j=0;j<9;j++){
+    const yy=cy-6+j*15+((G.time*10)%15);
+    ctx.fillRect(cx-R-4,yy,R*2+8,2+j*1.2);
+  }
+  ctx.globalCompositeOperation='source-over';
+  // 地平線グロー
+  ctx.fillStyle=css(G.col.grid,0.5);
+  ctx.shadowColor=css(G.col.grid);ctx.shadowBlur=14;
+  ctx.fillRect(0,VPY,W,2);
+  ctx.restore();
+}
+function drawFerrisWheel(cx2,r){
+  const cy2=VPY-r-8;
+  ctx.save();
+  // 支柱
+  ctx.strokeStyle='rgba(130,110,170,0.85)';ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.moveTo(cx2-r*0.55,VPY);ctx.lineTo(cx2,cy2);ctx.lineTo(cx2+r*0.55,VPY);ctx.stroke();
+  // リム(ネオン)
+  ctx.strokeStyle='rgba(255,43,214,0.8)';ctx.lineWidth=2.5;
+  ctx.shadowColor='#ff2bd6';ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(cx2,cy2,r,0,6.28);ctx.stroke();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='rgba(255,43,214,0.35)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(cx2,cy2,r*0.55,0,6.28);ctx.stroke();
+  // スポークとゴンドラ(ゆっくり回転)
+  const rot=G.time*0.18;
+  for(let i=0;i<8;i++){
+    const a=rot+i*Math.PI/4;
+    const gx=cx2+Math.cos(a)*r,gy=cy2+Math.sin(a)*r;
+    ctx.strokeStyle='rgba(255,43,214,0.4)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(cx2,cy2);ctx.lineTo(gx,gy);ctx.stroke();
+    ctx.fillStyle=NEONC[i%NEONC.length];
+    ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=5;
+    ctx.fillRect(gx-2,gy,4,5.5);
+    ctx.shadowBlur=0;
+  }
+  ctx.restore();
+}
+function drawSkyline(){
+  ctx.save();
+  // ---- 奥列: 淡いシルエット+うっすら窓 ----
+  for(const b of SKY_BLD){
+    if(b.layer!==0)continue;
+    ctx.fillStyle='rgba(14,7,34,0.72)';
+    ctx.fillRect(b.x,VPY-b.h,b.w,b.h);
+    ctx.fillStyle=css(G.col.acc,0.16);
+    for(let wy=VPY-b.h+5;wy<VPY-4;wy+=10)for(let wx=b.x+3;wx<b.x+b.w-4;wx+=9)
+      if(((wx*7+wy*13)%23)<5)ctx.fillRect(wx,wy,2,3);
+  }
+  // ---- ランドマーク観覧車 ----
+  drawFerrisWheel(W*0.13,46);
+  // ---- 手前列: ベガス風の個性ビル ----
+  for(const b of SKY_BLD){
+    if(b.layer!==1)continue;
+    if(b.style===6){
+      // ピラミッド型カジノ+頂上ビーム
+      ctx.fillStyle='rgba(5,2,18,0.96)';
+      ctx.beginPath();ctx.moveTo(b.x-4,VPY);ctx.lineTo(b.x+b.w/2,VPY-b.h);ctx.lineTo(b.x+b.w+4,VPY);ctx.closePath();ctx.fill();
+      ctx.strokeStyle=b.col;ctx.globalAlpha=0.7;ctx.lineWidth=1.5;ctx.stroke();ctx.globalAlpha=1;
+      ctx.save();ctx.globalCompositeOperation='lighter';
+      const bg2=ctx.createLinearGradient(0,VPY-b.h,0,VPY-b.h-130);
+      bg2.addColorStop(0,'rgba(255,240,180,0.45)');bg2.addColorStop(1,'rgba(255,240,180,0)');
+      ctx.fillStyle=bg2;ctx.fillRect(b.x+b.w/2-2,VPY-b.h-130,4,130);
+      ctx.restore();
+      continue;
+    }
+    ctx.fillStyle='rgba(5,2,18,0.96)';
+    ctx.fillRect(b.x,VPY-b.h,b.w,b.h);
+    // 窓明かり(暖色と差し色を混ぜ、たまにチカッと点滅)
+    for(let wy=VPY-b.h+4;wy<VPY-3;wy+=7)for(let wx=b.x+3;wx<b.x+b.w-4;wx+=7){
+      const idn=(wx*13+wy*7)%29;
+      if(idn<8){
+        const flick=idn===3&&(((G.time*2+wx*0.7)|0)%5===0);
+        ctx.fillStyle=flick?'rgba(255,255,255,0.95)':(idn<3?'rgba(255,200,120,0.6)':css(G.col.acc,0.5));
+        ctx.fillRect(wx,wy,2.5,3.5);
+      }
+    }
+    if(b.style===1){ // アンテナ+赤ビーコン
+      ctx.strokeStyle='rgba(120,130,170,0.8)';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(b.x+b.w/2,VPY-b.h);ctx.lineTo(b.x+b.w/2,VPY-b.h-16);ctx.stroke();
+      if(((G.time*1.5+b.seed)|0)%2){
+        ctx.fillStyle='#ff2b4e';ctx.shadowColor='#ff2b4e';ctx.shadowBlur=9;
+        ctx.fillRect(b.x+b.w/2-1.5,VPY-b.h-19,3,3);ctx.shadowBlur=0;
+      }
+    }else if(b.style===2){ // 屋上ネオンバー(脈動)
+      const pu=0.6+0.4*Math.sin(G.time*2+b.seed);
+      ctx.strokeStyle=b.col;ctx.globalAlpha=pu;ctx.lineWidth=1.5;
+      ctx.shadowColor=b.col;ctx.shadowBlur=8*pu;
+      ctx.strokeRect(b.x+b.w*0.15,VPY-b.h-9,b.w*0.7,7);
+      ctx.fillStyle=b.col;ctx.globalAlpha=0.3*pu;
+      ctx.fillRect(b.x+b.w*0.15,VPY-b.h-9,b.w*0.7,7);
+      ctx.globalAlpha=1;ctx.shadowBlur=0;
+    }else if(b.style===3){ // ドーム屋根
+      ctx.fillStyle='rgba(5,2,18,0.96)';
+      ctx.beginPath();ctx.arc(b.x+b.w/2,VPY-b.h,b.w/2,Math.PI,0);ctx.fill();
+      ctx.strokeStyle=b.col;ctx.globalAlpha=0.5;ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(b.x+b.w/2,VPY-b.h,b.w/2,Math.PI,0);ctx.stroke();ctx.globalAlpha=1;
+    }else if(b.style===4&&b.text){ // 縦型ネオンサイン(マーキー点滅)
+      const ch=[...b.text];
+      const sh=ch.length*10+8;
+      if(b.h>sh+14){
+        const sy=VPY-b.h+5,sx2=b.x-10;
+        ctx.fillStyle='rgba(10,5,20,0.92)';ctx.strokeStyle=b.col;ctx.lineWidth=1.2;
+        ctx.shadowColor=b.col;ctx.shadowBlur=6+3*Math.sin(G.time*3+b.seed);
+        ctx.fillRect(sx2,sy,14,sh);ctx.strokeRect(sx2,sy,14,sh);
+        ctx.shadowBlur=0;
+        ctx.fillStyle=b.col;ctx.font='900 9px "Hiragino Kaku Gothic ProN",sans-serif';
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        for(let i=0;i<ch.length;i++){
+          ctx.globalAlpha=(((G.time*5+b.seed)|0)%(ch.length+2))===i?0.2:1; // 1文字ずつ消えるマーキー
+          ctx.fillText(ch[i],sx2+7,sy+9+i*10);
+        }
+        ctx.globalAlpha=1;
+      }
+    }else if(b.style===5&&b.text){ // 屋上ビルボード広告
+      const bw2=Math.max(b.w*1.25,b.text.length*8+10);
+      const bx2=b.x+b.w/2-bw2/2,byy=VPY-b.h-17;
+      ctx.strokeStyle='rgba(120,130,170,0.8)';ctx.lineWidth=1.5;
+      ctx.beginPath();
+      ctx.moveTo(b.x+b.w*0.25,VPY-b.h);ctx.lineTo(b.x+b.w*0.25,byy+13);
+      ctx.moveTo(b.x+b.w*0.75,VPY-b.h);ctx.lineTo(b.x+b.w*0.75,byy+13);
+      ctx.stroke();
+      const pu=0.7+0.3*Math.sin(G.time*1.6+b.seed);
+      ctx.fillStyle='rgba(10,5,20,0.92)';ctx.strokeStyle=b.col;ctx.lineWidth=1.3;
+      ctx.shadowColor=b.col;ctx.shadowBlur=8*pu;
+      ctx.fillRect(bx2,byy,bw2,13);ctx.strokeRect(bx2,byy,bw2,13);
+      ctx.shadowBlur=0;
+      ctx.fillStyle=b.col;ctx.font='900 8.5px "Hiragino Kaku Gothic ProN",sans-serif';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(b.text,b.x+b.w/2,byy+7);
+    }else if(b.style===7){ // ネオンクラウン(王冠アーチ)
+      for(let i=0;i<3;i++){
+        const pu=0.5+0.5*Math.sin(G.time*2.5+b.seed+i*0.9);
+        ctx.strokeStyle=b.col;ctx.globalAlpha=pu*0.9;ctx.lineWidth=1.5;
+        ctx.shadowColor=b.col;ctx.shadowBlur=6*pu;
+        ctx.beginPath();ctx.arc(b.x+b.w/2,VPY-b.h,b.w*0.18+i*5,Math.PI,0);ctx.stroke();
+      }
+      ctx.globalAlpha=1;ctx.shadowBlur=0;
+    }else if(b.style===8){ // 空を掃くサーチライト
+      const ang=-Math.PI/2+Math.sin(G.time*0.4+b.seed)*0.6;
+      const bx3=b.x+b.w/2,by3=VPY-b.h;
+      const ex=bx3+Math.cos(ang)*175,ey=by3+Math.sin(ang)*175;
+      ctx.save();ctx.globalCompositeOperation='lighter';
+      const sg=ctx.createLinearGradient(bx3,by3,ex,ey);
+      sg.addColorStop(0,'rgba(200,220,255,0.30)');sg.addColorStop(1,'rgba(200,220,255,0)');
+      ctx.fillStyle=sg;
+      const pa=ang+Math.PI/2,wE=26;
+      ctx.beginPath();ctx.moveTo(bx3,by3);
+      ctx.lineTo(ex+Math.cos(pa)*wE,ey+Math.sin(pa)*wE);
+      ctx.lineTo(ex-Math.cos(pa)*wE,ey-Math.sin(pa)*wE);
+      ctx.closePath();ctx.fill();
+      ctx.restore();
+      ctx.fillStyle='rgba(230,240,255,0.9)';ctx.fillRect(bx3-2,by3-3,4,3);
+    }
+    // ネオンエッジのタワー(たまに)
+    if(b.seed>84){
+      ctx.strokeStyle=b.col;ctx.globalAlpha=0.5;ctx.lineWidth=1.5;
+      ctx.shadowColor=b.col;ctx.shadowBlur=5;
+      ctx.strokeRect(b.x,VPY-b.h,b.w,b.h);
+      ctx.globalAlpha=1;ctx.shadowBlur=0;
+    }
+  }
+  // 街の上空を飛ぶ航空UFOの点滅灯
+  for(let i=0;i<3;i++){
+    const fx=((G.time*(14+i*7))+i*450)%(W+100)-50;
+    const fyy=VPY-125-(i*26)%50;
+    ctx.fillStyle=((G.time*3+i)|0)%2?'rgba(255,80,120,0.9)':'rgba(80,220,255,0.9)';
+    ctx.fillRect(fx,fyy,3,3);
+    ctx.fillStyle='rgba(180,200,255,0.25)';
+    ctx.fillRect(fx-7,fyy+1,5,1.5);
+  }
+  ctx.restore();
+}
+function drawAdTicker(){
+  // 空中ホログラム広告ティッカー
+  ctx.save();
+  ctx.globalAlpha=0.55;
+  ctx.fillStyle='rgba(0,229,255,0.07)';
+  ctx.fillRect(0,VPY-110,W,28);
+  ctx.font='700 19px "Hiragino Kaku Gothic ProN",sans-serif';
+  ctx.textBaseline='middle';ctx.textAlign='left';
+  ctx.fillStyle='rgba(0,229,255,0.8)';
+  ctx.shadowColor='#00e5ff';ctx.shadowBlur=6;
+  const txt=ADS.join('   ◆   ')+'   ◆   ';
+  ctx.fillText(txt,G.adX,VPY-94);
+  ctx.restore();
+}
+function drawGrid(){
+  ctx.save();
+  const gc=css(G.col.grid);
+  const eL=-ROAD_EDGE,eR=ROAD_EDGE;
+  // 外側の縦線(路面の外だけ・控えめ)
+  ctx.lineWidth=1.2;
+  for(let k=-13;k<=13;k++){
+    if(Math.abs(k*115)<ROAD_EDGE+40)continue;
+    const a=proj(0.02,k*115),b=proj(1.03,k*115);
+    ctx.strokeStyle=css(G.col.grid,0.07+0.05*(4-Math.min(4,Math.abs(k))));
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  }
+  // 横線(流れる・全幅・控えめ)
+  for(let i=0;i<13;i++){
+    const tt=((i/13)+G.gridOff)%1;
+    const a=proj(tt,-2200),b=proj(tt,2200);
+    ctx.strokeStyle=css(G.col.grid,0.06+0.30*a.e);
+    ctx.lineWidth=0.5+a.e*1.8;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  }
+  // ---- 路面(はっきり暗いアスファルト面) ----
+  const fL=proj(0.02,eL),fR=proj(0.02,eR),nL=proj(1.03,eL),nR=proj(1.03,eR);
+  const rg=ctx.createLinearGradient(0,VPY,0,BOTY);
+  rg.addColorStop(0,'rgba(10,6,26,0.4)');rg.addColorStop(1,'rgba(8,4,22,0.92)');
+  ctx.fillStyle=rg;
+  ctx.beginPath();ctx.moveTo(fL.x,fL.y);ctx.lineTo(nL.x,nL.y);ctx.lineTo(nR.x,nR.y);ctx.lineTo(fR.x,fR.y);ctx.closePath();ctx.fill();
+  // 路面上の横ライン(スピード感)
+  for(let i=0;i<13;i++){
+    const tt=((i/13)+G.gridOff)%1;
+    const a=proj(tt,eL),b=proj(tt,eR);
+    ctx.strokeStyle=css(G.col.grid,0.08+0.28*a.e);
+    ctx.lineWidth=0.5+a.e*1.5;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  }
+  // 現在レーンのハイライト
+  if(G.state==='playing'&&!G.player.dead){
+    const lo=G.player.lane*LANE_W;
+    const a1=proj(0.3,lo-LANE_W*0.44),a2=proj(0.3,lo+LANE_W*0.44),b1=proj(1.03,lo-LANE_W*0.44),b2=proj(1.03,lo+LANE_W*0.44);
+    ctx.fillStyle=css(G.col.acc,0.06);
+    ctx.beginPath();ctx.moveTo(a1.x,a1.y);ctx.lineTo(b1.x,b1.y);ctx.lineTo(b2.x,b2.y);ctx.lineTo(a2.x,a2.y);ctx.closePath();ctx.fill();
+  }
+  // 路肩エッジライン(太く発光)
+  for(const xo of [eL,eR]){
+    const a=proj(0.02,xo),b=proj(1.03,xo);
+    ctx.strokeStyle=css(G.col.grid,0.95);
+    ctx.lineWidth=5;ctx.shadowColor=gc;ctx.shadowBlur=18;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  }
+  ctx.shadowBlur=0;
+  // 車線境界(流れる白破線・5レーン分)
+  for(const xo of [-LANE_W*1.5,-LANE_W*0.5,LANE_W*0.5,LANE_W*1.5]){
+    ctx.strokeStyle='rgba(255,255,255,0.85)';
+    ctx.shadowColor='#ffffff';ctx.shadowBlur=6;
+    for(let i=0;i<9;i++){
+      const t0=((i/9)+G.gridOff)%1,t1=Math.min(1.03,t0+0.045);
+      const a=proj(t0,xo),b=proj(t1,xo);
+      ctx.lineWidth=1+a.e*2.5;
+      ctx.globalAlpha=0.15+0.65*a.e;
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    }
+    ctx.globalAlpha=1;ctx.shadowBlur=0;
+  }
+  ctx.restore();
+}
+function drawSpeedStreaks(){ // 疾走感の放射スピードライン
+  const sp=G.speed+(G.pw.boost>0?0.4:0)+(G.bonus?0.3:0);
+  if(sp<0.55||G.state!=='playing')return;
+  const inten=Math.min(1,(sp-0.55)/0.6);
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  const cx2=W/2,cy2=H*0.42;
+  for(let i=0;i<12;i++){
+    const ang=(i/12)*6.28+(i%2?0.26:0);
+    const rr=((G.time*(500+i*90))%430)+300;
+    const x1=cx2+Math.cos(ang)*rr,y1=cy2+Math.sin(ang)*rr*0.8;
+    if(x1>170&&x1<W-170&&y1>90&&y1<H-140)continue; // 中央の視界は塞がない
+    const len=45+inten*80;
+    ctx.strokeStyle=`rgba(180,230,255,${0.09+0.16*inten})`;
+    ctx.lineWidth=2.2;
+    ctx.beginPath();ctx.moveTo(x1,y1);
+    ctx.lineTo(cx2+Math.cos(ang)*(rr+len),cy2+Math.sin(ang)*(rr+len)*0.8);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawHaze(){
+  // 地平線付近の大気遠近(遠くほど霞む)
+  const g=ctx.createLinearGradient(0,VPY-4,0,VPY+95);
+  g.addColorStop(0,css(G.col.bot,0.55));
+  g.addColorStop(1,'rgba(5,2,15,0)');
+  ctx.fillStyle=g;ctx.fillRect(0,VPY-4,W,99);
+}
+
+function drawFireworksLayer(){
+  // 打ち上げ中の光点
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  for(const f of G.fw){
+    if(!f.burst){
+      const y=lerp(VPY+40,f.y,f.t/0.4);
+      ctx.fillStyle=f.col;ctx.shadowColor=f.col;ctx.shadowBlur=8;
+      ctx.fillRect(f.x-1,y,2,6);
+    }
+  }
+  ctx.restore();
+}
+
+// ---- ワールドオブジェクト描画 ----
+function drawWorld(){
+  const list=[];
+  for(const o of G.obs)list.push({t:o.t,fn:()=>drawObstacle(o)});
+  for(const it of G.items)list.push({t:it.t,fn:()=>drawItem(it)});
+  for(const pr of G.props)list.push({t:pr.t,fn:()=>drawProp(pr)});
+  for(const g of G.groups)list.push({t:g.t,fn:()=>g.kind==='dt'?drawDriveThru(g):drawBuilding(g)});
+  for(const r of G.rockets)list.push({t:r.t,fn:()=>drawRocket(r)});
+  list.sort((a,b)=>a.t-b.t);
+  for(const e of list)e.fn();
+  // 追跡イベント(横切り)
+  if(G.chase){
+    const pz=proj(0.55,0);
+    const x=lerp(-100,W+100,Math.min(1,G.chase.t));
+    drawAlienFigure(x,pz.y-14,pz.s*2.4,G.time*8,'#aaffaa');
+    // 警察UFO
+    const px2=x-130,ps=pz.s*2.2;
+    ctx.save();
+    ctx.fillStyle='#223';ctx.strokeStyle='#8899bb';ctx.lineWidth=2;
+    ctx.beginPath();ctx.ellipse(px2,pz.y-30,26*ps,9*ps,0,0,6.28);ctx.fill();ctx.stroke();
+    ctx.fillStyle=(G.time*6|0)%2?'#ff2b4e':'#00a2ff';
+    ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=14;
+    ctx.fillRect(px2-5*ps,pz.y-30-14*ps,10*ps,7*ps);
+    ctx.restore();
+  }
+}
+function drawObstacle(o){
+  const pz=proj(o.t,(o.laneF||0)*LANE_W);
+  const s=pz.s;
+  if(o.type!=='laser')groundShadow(pz.x,pz.y+7*s,(o.type==='ufo'?30:24)*s,0.45);
+  ctx.save();ctx.translate(pz.x,pz.y);
+  if(o.type==='ast'||o.type==='spin'||o.type==='debris'){
+    ctx.rotate(o.rot||0);
+    const r=(o.type==='debris'?18:24)*s;
+    ctx.strokeStyle=o.type==='debris'?'#8899aa':css(h2r('#ff9100'));
+    ctx.fillStyle='rgba(20,8,30,0.9)';
+    ctx.lineWidth=2*s;ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=8*s;
+    ctx.beginPath();
+    for(let i=0;i<7;i++){
+      const a=i/7*6.28,rr=r*(0.75+0.3*Math.sin(i*2.7+(o.rot||0)*0.3+1));
+      i?ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr):ctx.moveTo(Math.cos(a)*rr,Math.sin(a)*rr);
+    }
+    ctx.closePath();ctx.fill();ctx.stroke();
+    if(o.type==='spin'){ctx.strokeStyle='rgba(255,213,79,0.7)';ctx.beginPath();ctx.arc(0,0,r*1.25,o.rot,o.rot+1.6);ctx.stroke();}
+  }else if(o.type==='ufo'){
+    ctx.strokeStyle='#ff2b4e';ctx.fillStyle='rgba(30,5,15,0.9)';
+    ctx.lineWidth=2*s;ctx.shadowColor='#ff2b4e';ctx.shadowBlur=10*s;
+    ctx.beginPath();ctx.ellipse(0,0,30*s,10*s,0,0,6.28);ctx.fill();ctx.stroke();
+    ctx.beginPath();ctx.arc(0,-6*s,11*s,Math.PI,0);ctx.stroke();
+    ctx.fillStyle='#ff2b4e';
+    for(let i=-1;i<=1;i++)ctx.fillRect(i*14*s-2*s,2*s,4*s,3*s);
+  }else if(o.type==='laser'){
+    const on=((G.time*0.8+o.phase)%1)<0.5;
+    // 両脇パイロン
+    for(const side of [-1,1]){
+      const px2=proj(o.t,side*LANE_W*2.6);
+      ctx.save();ctx.translate(px2.x,px2.y);
+      ctx.fillStyle='#1a1030';ctx.strokeStyle=css(G.col.acc);ctx.lineWidth=2*s;
+      ctx.shadowColor=css(G.col.acc);ctx.shadowBlur=8;
+      ctx.beginPath();ctx.rect(-6*s,-56*s,12*s,56*s);ctx.fill();ctx.stroke();
+      ctx.fillStyle=on?'#ff2b4e':'#333344';ctx.beginPath();ctx.arc(0,-56*s,5*s,0,6.28);ctx.fill();
+      ctx.restore();
+    }
+    if(on){
+      const a=proj(o.t,-LANE_W*2.6),b=proj(o.t,LANE_W*2.6);
+      ctx.save();ctx.strokeStyle='#ff2b4e';ctx.lineWidth=4*s;ctx.shadowColor='#ff2b4e';ctx.shadowBlur=16;
+      ctx.globalAlpha=0.7+0.3*Math.sin(G.time*30);
+      ctx.beginPath();ctx.moveTo(a.x,a.y-30*s);ctx.lineTo(b.x,b.y-30*s);ctx.stroke();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+function drawItem(it){
+  const pz=proj(it.t,it.laneF*LANE_W);
+  const s=pz.s;
+  const bob=Math.sin(G.time*4+it.t*10)*4*s;
+  groundShadow(pz.x,pz.y+3*s,(10-bob*0.4)*s,0.35);
+  ctx.save();ctx.translate(pz.x,pz.y-18*s);
+  ctx.translate(0,bob);
+  if(it.type==='crystal'||it.type==='rare'){
+    const col=it.type==='rare'?'#ffd54f':'#00e5ff';
+    const r=(it.type==='rare'?16:11)*s;
+    ctx.rotate(it.rot);
+    ctx.strokeStyle=col;ctx.fillStyle=it.type==='rare'?'rgba(80,60,0,0.6)':'rgba(0,40,60,0.6)';
+    ctx.lineWidth=2*s;ctx.shadowColor=col;ctx.shadowBlur=12*s;
+    ctx.beginPath();ctx.moveTo(0,-r);ctx.lineTo(r*0.7,0);ctx.lineTo(0,r);ctx.lineTo(-r*0.7,0);ctx.closePath();
+    ctx.fill();ctx.stroke();
+  }else{
+    const icons={shield:['◎','#00e5ff'],boost:['⚡','#ff9100'],magnet:['U','#ff2bd6'],slow:['◷','#7c4dff'],mystery:['?','#ffd54f']};
+    const[ic,col]=icons[it.type]||['?','#fff'];
+    ctx.strokeStyle=col;ctx.fillStyle='rgba(10,5,25,0.85)';
+    ctx.lineWidth=2*s;ctx.shadowColor=col;ctx.shadowBlur=12*s;
+    const r=15*s;
+    ctx.beginPath();ctx.rect(-r,-r,r*2,r*2);ctx.fill();ctx.stroke();
+    ctx.fillStyle=col;ctx.font=`900 ${18*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(ic,0,1);
+  }
+  ctx.restore();
+}
+function drawAlienFigure(x,y,s,ph,col){
+  groundShadow(x,y+2*s,7*s,0.35);
+  ctx.save();ctx.translate(x,y);
+  ctx.strokeStyle=col;ctx.lineWidth=Math.max(1,2*s);
+  ctx.shadowColor=col;ctx.shadowBlur=6*s;
+  // 頭
+  ctx.beginPath();ctx.arc(0,-22*s,6*s,0,6.28);ctx.stroke();
+  // アンテナ
+  ctx.beginPath();ctx.moveTo(0,-28*s);ctx.lineTo(0,-33*s);ctx.stroke();
+  ctx.beginPath();ctx.arc(0,-34*s,1.5*s,0,6.28);ctx.stroke();
+  // 体
+  ctx.beginPath();ctx.moveTo(0,-16*s);ctx.lineTo(0,-4*s);ctx.stroke();
+  // 脚(歩き)
+  const sw=Math.sin(ph)*5*s;
+  ctx.beginPath();ctx.moveTo(0,-4*s);ctx.lineTo(-3*s+sw,0);ctx.moveTo(0,-4*s);ctx.lineTo(3*s-sw,0);ctx.stroke();
+  // 腕
+  ctx.beginPath();ctx.moveTo(0,-14*s);ctx.lineTo(-6*s,-10*s+sw*0.5);ctx.moveTo(0,-14*s);ctx.lineTo(6*s,-10*s-sw*0.5);ctx.stroke();
+  ctx.restore();
+}
+function drawProp(pr){
+  const pz=proj(pr.t,pr.xoff);
+  const s=pz.s*2.3;   // 路肩キャラは大きめに描く(PCワイド画面向け)
+  if(s<0.45&&pr.type!=='gate'&&pr.type!=='lamp')return; // ゲートと街灯は遠くから見せる
+  const sd=Math.abs(pr.xoff*0.7137)%100; // 形状用の固定シード(ph は動きの位相なので形状に使わない)
+  ctx.save();
+  const acc=css(G.col.acc);
+  switch(pr.type){
+    case 'hitch':{
+      drawAlienFigure(pz.x,pz.y,s,Math.sin(pr.ph)*0.5,'#aaffcc');
+      // プラカード
+      ctx.translate(pz.x+10*s,pz.y-30*s);
+      ctx.fillStyle='rgba(20,10,35,0.9)';ctx.strokeStyle=acc;ctx.lineWidth=1.5*s;
+      ctx.shadowColor=acc;ctx.shadowBlur=5;
+      const pw=Math.max(60,pr.line.length*11)*s;
+      ctx.fillRect(-4*s,-16*s,pw,19*s);ctx.strokeRect(-4*s,-16*s,pw,19*s);
+      if(s>0.8){ctx.fillStyle='#fff';ctx.font=`700 ${10*s}px "Hiragino Kaku Gothic ProN",sans-serif`;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(pr.line,0,-6.5*s);}
+      break;}
+    case 'jog':{
+      drawAlienFigure(pz.x,pz.y,s,pr.ph*3,'#ffcc88');
+      break;}
+    case 'music':{
+      drawAlienFigure(pz.x,pz.y,s,0.3,'#cc99ff');
+      ctx.strokeStyle='#cc99ff';ctx.lineWidth=1.5*s;
+      ctx.beginPath();ctx.moveTo(pz.x+7*s,pz.y-2*s);ctx.lineTo(pz.x+7*s,pz.y-18*s);ctx.stroke();
+      // 音符
+      if(s>0.7){ctx.fillStyle='#cc99ff';ctx.font=`${12*s}px sans-serif`;ctx.fillText('♪',pz.x+12*s+Math.sin(pr.ph)*6,pz.y-32*s);}
+      break;}
+    case 'protest':{
+      for(let i=0;i<3;i++)drawAlienFigure(pz.x+(i-1)*13*s,pz.y,s*0.9,Math.sin(pr.ph+i)*0.6,'#ffaaaa');
+      ctx.fillStyle='rgba(35,10,10,0.9)';ctx.strokeStyle='#ff5252';ctx.lineWidth=1.5*s;
+      const pw2=Math.max(50,pr.line.length*11.5)*s;
+      ctx.fillRect(pz.x-pw2/2,pz.y-58*s,pw2,19*s);ctx.strokeRect(pz.x-pw2/2,pz.y-58*s,pw2,19*s);
+      if(s>0.8){ctx.fillStyle='#fff';ctx.font=`700 ${10*s}px "Hiragino Kaku Gothic ProN",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(pr.line,pz.x,pz.y-48*s);}
+      break;}
+    case 'vendor':{
+      ctx.fillStyle='rgba(25,12,40,0.95)';ctx.strokeStyle='#ffd54f';ctx.lineWidth=1.5*s;
+      ctx.shadowColor='#ffd54f';ctx.shadowBlur=6;
+      ctx.fillRect(pz.x-20*s,pz.y-26*s,40*s,26*s);ctx.strokeRect(pz.x-20*s,pz.y-26*s,40*s,26*s);
+      ctx.beginPath();ctx.moveTo(pz.x-24*s,pz.y-26*s);ctx.lineTo(pz.x,pz.y-38*s);ctx.lineTo(pz.x+24*s,pz.y-26*s);ctx.closePath();ctx.stroke();
+      drawAlienFigure(pz.x,pz.y-2*s,s*0.7,0,'#ffd54f');
+      break;}
+    case 'pet':{
+      ctx.strokeStyle='#88ffee';ctx.lineWidth=1.5*s;ctx.shadowColor='#88ffee';ctx.shadowBlur=5;
+      ctx.beginPath();ctx.ellipse(pz.x,pz.y-6*s,8*s,5*s,0,0,6.28);ctx.stroke();
+      ctx.beginPath();ctx.arc(pz.x+8*s,pz.y-10*s,3*s,0,6.28);ctx.stroke();
+      const sw=Math.sin(pr.ph*2)*3*s;
+      ctx.beginPath();
+      for(const lx of [-5,-2,2,5]){ctx.moveTo(pz.x+lx*s,pz.y-2*s);ctx.lineTo(pz.x+lx*s+(lx<0?sw:-sw)*0.3,pz.y+2*s);}
+      ctx.stroke();
+      break;}
+    case 'robot':{
+      const spark=Math.random()<0.05;
+      ctx.strokeStyle=spark?'#ffffff':'#8899ff';ctx.lineWidth=1.5*s;ctx.shadowColor='#8899ff';ctx.shadowBlur=5;
+      ctx.strokeRect(pz.x-6*s,pz.y-20*s,12*s,12*s);
+      ctx.strokeRect(pz.x-8*s,pz.y-8*s,16*s,8*s);
+      if(spark){ctx.fillStyle='#ffd54f';for(let k=0;k<4;k++)ctx.fillRect(pz.x+rnd(-10,10)*s,pz.y-22*s+rnd(-4,4),2,2);}
+      break;}
+    case 'bdance':{
+      groundShadow(pz.x,pz.y,14*s);
+      ctx.save();ctx.translate(pz.x,pz.y-14*s);ctx.rotate(pr.ph*2);
+      ctx.strokeStyle='#ff2bd6';ctx.fillStyle='rgba(30,5,25,0.9)';ctx.lineWidth=2*s;
+      ctx.shadowColor='#ff2bd6';ctx.shadowBlur=8;
+      ctx.beginPath();ctx.ellipse(0,0,16*s,6*s,0,0,6.28);ctx.fill();ctx.stroke();
+      ctx.restore();
+      break;}
+    case 'palm':{ // ネオンヤシの木
+      groundShadow(pz.x,pz.y,12*s,0.35);
+      const bend=pr.side*-14*s, hh=56*s;
+      ctx.strokeStyle='#ff2bd6';ctx.lineWidth=2.5*s;ctx.shadowColor='#ff2bd6';ctx.shadowBlur=8;
+      ctx.beginPath();ctx.moveTo(pz.x,pz.y);ctx.quadraticCurveTo(pz.x+bend*0.3,pz.y-hh*0.6,pz.x+bend,pz.y-hh);ctx.stroke();
+      ctx.strokeStyle=css(G.col.acc);ctx.shadowColor=css(G.col.acc);
+      for(let i=0;i<6;i++){
+        const a=-Math.PI/2+(i-2.5)*0.5+Math.sin(G.time+pr.ph)*0.04;
+        ctx.beginPath();ctx.moveTo(pz.x+bend,pz.y-hh);
+        ctx.quadraticCurveTo(pz.x+bend+Math.cos(a)*22*s,pz.y-hh+Math.sin(a)*22*s-6*s,pz.x+bend+Math.cos(a)*34*s,pz.y-hh+Math.sin(a)*30*s);
+        ctx.stroke();
+      }
+      break;}
+    case 'crys':{ // 巨大結晶
+      groundShadow(pz.x,pz.y,16*s,0.35);
+      const col=css(G.col.acc);
+      ctx.strokeStyle=col;ctx.fillStyle=css(G.col.acc,0.15);ctx.lineWidth=2*s;
+      ctx.shadowColor=col;ctx.shadowBlur=12;
+      for(const[dx,hh,ww]of[[0,52,13],[-13,30,9],[12,36,10]]){
+        ctx.beginPath();
+        ctx.moveTo(pz.x+dx*s,pz.y);ctx.lineTo(pz.x+(dx-ww)*s,pz.y-hh*0.55*s);
+        ctx.lineTo(pz.x+dx*s,pz.y-hh*s);ctx.lineTo(pz.x+(dx+ww)*s,pz.y-hh*0.55*s);ctx.closePath();
+        ctx.fill();ctx.stroke();
+      }
+      break;}
+    case 'rock':{ // 岩石
+      groundShadow(pz.x,pz.y+2*s,20*s,0.4);
+      ctx.strokeStyle='#ff9100';ctx.fillStyle='rgba(40,15,8,0.95)';ctx.lineWidth=2*s;
+      ctx.shadowColor='#ff9100';ctx.shadowBlur=7;
+      ctx.beginPath();
+      for(let i=0;i<8;i++){
+        const a=i/8*6.28,rr=(16+10*rndSeeded(sd+i))*s;
+        const px3=pz.x+Math.cos(a)*rr,py3=pz.y-14*s+Math.sin(a)*rr*0.7;
+        i?ctx.lineTo(px3,py3):ctx.moveTo(px3,py3);
+      }
+      ctx.closePath();ctx.fill();ctx.stroke();
+      break;}
+    case 'ringpost':{ // リングワールドの柱
+      groundShadow(pz.x,pz.y,10*s,0.35);
+      const hh=64*s;
+      ctx.strokeStyle='#00e5ff';ctx.lineWidth=3*s;ctx.shadowColor='#00e5ff';ctx.shadowBlur=10;
+      ctx.beginPath();ctx.moveTo(pz.x,pz.y);ctx.lineTo(pz.x,pz.y-hh);ctx.stroke();
+      ctx.beginPath();ctx.arc(pz.x,pz.y-hh-14*s,14*s,0,6.28);ctx.stroke();
+      ctx.strokeStyle='rgba(255,255,255,0.7)';ctx.lineWidth=1.5*s;
+      ctx.beginPath();ctx.arc(pz.x,pz.y-hh-14*s,8*s,G.time*2,G.time*2+4);ctx.stroke();
+      break;}
+    case 'junk': case 'wreck':{ // 廃棄物の山/難破船
+      groundShadow(pz.x,pz.y+2*s,24*s,0.4);
+      ctx.strokeStyle='#00ffb3';ctx.fillStyle='rgba(18,22,20,0.95)';ctx.lineWidth=1.5*s;
+      ctx.shadowColor='#00ffb3';ctx.shadowBlur=6;
+      if(pr.type==='junk'){
+        for(const[dx,dy,ww,hh]of[[-14,0,16,14],[2,0,20,20],[-6,-16,14,10],[14,-4,10,12]]){
+          ctx.fillRect(pz.x+dx*s,pz.y-(dy+hh)*s,ww*s,hh*s);ctx.strokeRect(pz.x+dx*s,pz.y-(dy+hh)*s,ww*s,hh*s);
+        }
+        if(Math.random()<0.03){ctx.fillStyle='#ccffcc';ctx.fillRect(pz.x+rnd(-16,16)*s,pz.y-rnd(10,30)*s,2,2);}
+      }else{
+        // 難破UFO(半分埋まった円盤)
+        ctx.save();ctx.translate(pz.x,pz.y-6*s);ctx.rotate(0.5*pr.side);
+        ctx.beginPath();ctx.ellipse(0,0,30*s,10*s,0,Math.PI,0);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.beginPath();ctx.arc(0,-4*s,10*s,Math.PI,0);ctx.stroke();
+        ctx.restore();
+      }
+      break;}
+    case 'obelisk':{ // 浮遊オベリスク
+      const bob2=Math.sin(G.time*1.5+pr.ph)*6*s;
+      groundShadow(pz.x,pz.y,14*s,0.3+0.1*Math.sin(G.time*1.5+pr.ph));
+      ctx.strokeStyle='#c400ff';ctx.fillStyle='rgba(30,0,45,0.9)';ctx.lineWidth=2*s;
+      ctx.shadowColor='#c400ff';ctx.shadowBlur=14;
+      ctx.save();ctx.translate(pz.x,pz.y-40*s+bob2);
+      ctx.beginPath();ctx.moveTo(0,-26*s);ctx.lineTo(11*s,10*s);ctx.lineTo(0,26*s);ctx.lineTo(-11*s,10*s);ctx.closePath();
+      ctx.fill();ctx.stroke();
+      ctx.fillStyle='#ff80ff';ctx.fillRect(-1.5*s,-8*s,3*s,16*s);
+      ctx.restore();
+      break;}
+    case 'flower':{ // 発光する宇宙花
+      const col=(sd|0)%2?'#ff2bd6':'#00e5ff';
+      const pulse=0.7+0.3*Math.sin(G.time*3+pr.ph);
+      groundShadow(pz.x,pz.y,6*s,0.3);
+      ctx.strokeStyle=col;ctx.lineWidth=1.5*s;ctx.shadowColor=col;ctx.shadowBlur=8*pulse;
+      const hh=(18+8*rndSeeded(sd))*s;
+      ctx.beginPath();ctx.moveTo(pz.x,pz.y);ctx.quadraticCurveTo(pz.x+4*s,pz.y-hh*0.6,pz.x,pz.y-hh);ctx.stroke();
+      ctx.fillStyle=col;ctx.globalAlpha=pulse;
+      for(let i=0;i<5;i++){const a=i/5*6.28+G.time*0.4;
+        ctx.beginPath();ctx.ellipse(pz.x+Math.cos(a)*5*s,pz.y-hh+Math.sin(a)*5*s,3.5*s,1.8*s,a,0,6.28);ctx.fill();}
+      ctx.globalAlpha=1;ctx.fillStyle='#ffffff';
+      ctx.beginPath();ctx.arc(pz.x,pz.y-hh,2*s,0,6.28);ctx.fill();
+      break;}
+    case 'billboard':{ // ロードサイドのネオン看板
+      const big=pr.big?1.5:1;
+      groundShadow(pz.x,pz.y,26*s*big,0.4);
+      const bw=(Math.max(70,pr.line.length*15.5)+14)*s*big,bh=34*s*big,by=pz.y-(46+22*rndSeeded(sd))*s*big;
+      ctx.strokeStyle='#556';ctx.lineWidth=2.5*s;
+      ctx.beginPath();ctx.moveTo(pz.x-8*s,pz.y);ctx.lineTo(pz.x-8*s,by+bh);ctx.moveTo(pz.x+8*s,pz.y);ctx.lineTo(pz.x+8*s,by+bh);ctx.stroke();
+      const bcol=(sd|0)%2?'#ffd54f':css(G.col.acc);
+      ctx.fillStyle='rgba(12,6,26,0.95)';ctx.strokeStyle=bcol;ctx.lineWidth=2*s;
+      ctx.shadowColor=bcol;ctx.shadowBlur=10;
+      ctx.fillRect(pz.x-bw/2,by,bw,bh);ctx.strokeRect(pz.x-bw/2,by,bw,bh);
+      // 縁の電球(順番に点滅)
+      ctx.fillStyle='#fff';
+      for(let i=0;i<8;i++){if(((G.time*6|0)+i)%4===0)continue;
+        ctx.fillRect(pz.x-bw/2+4*s+i*(bw-8*s)/7-1,by-3*s,2.5*s,2.5*s);}
+      if(s>0.6){ctx.fillStyle=bcol;ctx.font=`900 ${13.5*s*big}px "Hiragino Kaku Gothic ProN",sans-serif`;
+        ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(pr.line,pz.x,by+bh/2);}
+      break;}
+    case 'lantern':{ // 浮遊ランタン
+      const fy=pz.y-(30+26*rndSeeded(sd))*s+Math.sin(G.time*1.6+pr.ph)*7*s;
+      const col=(sd|0)%2?'#ffd54f':'#ff80ff';
+      groundShadow(pz.x,pz.y,5*s,0.22);
+      ctx.save();ctx.globalCompositeOperation='lighter';
+      const gr=ctx.createRadialGradient(pz.x,fy,0,pz.x,fy,14*s);
+      gr.addColorStop(0,col);gr.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.globalAlpha=0.5+0.2*Math.sin(G.time*3+pr.ph);
+      ctx.fillStyle=gr;ctx.beginPath();ctx.arc(pz.x,fy,14*s,0,6.28);ctx.fill();
+      ctx.restore();
+      ctx.fillStyle=col;ctx.strokeStyle='#fff';ctx.lineWidth=1;
+      ctx.fillRect(pz.x-3.5*s,fy-4.5*s,7*s,9*s);ctx.strokeRect(pz.x-3.5*s,fy-4.5*s,7*s,9*s);
+      break;}
+    case 'arch':{ // 岩のアーチ
+      groundShadow(pz.x,pz.y+2*s,40*s,0.4);
+      ctx.strokeStyle='#ff9100';ctx.fillStyle='rgba(40,15,8,0.95)';ctx.lineWidth=2.5*s;
+      ctx.shadowColor='#ff9100';ctx.shadowBlur=8;
+      const aw=42*s,ah=52*s;
+      ctx.beginPath();
+      ctx.moveTo(pz.x-aw,pz.y);ctx.lineTo(pz.x-aw+6*s,pz.y-ah*0.7);ctx.quadraticCurveTo(pz.x,pz.y-ah*1.25,pz.x+aw-6*s,pz.y-ah*0.7);ctx.lineTo(pz.x+aw,pz.y);
+      ctx.lineTo(pz.x+aw*0.55,pz.y);ctx.quadraticCurveTo(pz.x,pz.y-ah*0.62,pz.x-aw*0.55,pz.y);ctx.closePath();
+      ctx.fill();ctx.stroke();
+      break;}
+    case 'vent':{ // 溶岩噴気孔(火の粉が舞う)
+      groundShadow(pz.x,pz.y+2*s,18*s,0.4);
+      ctx.fillStyle='rgba(40,15,8,0.95)';ctx.strokeStyle='#ff5222';ctx.lineWidth=2*s;
+      ctx.shadowColor='#ff5222';ctx.shadowBlur=10;
+      ctx.beginPath();ctx.moveTo(pz.x-16*s,pz.y);ctx.quadraticCurveTo(pz.x,pz.y-26*s,pz.x+16*s,pz.y);ctx.closePath();
+      ctx.fill();ctx.stroke();
+      const glow=0.5+0.5*Math.sin(G.time*5+pr.ph);
+      ctx.fillStyle=`rgba(255,120,30,${0.6*glow})`;
+      ctx.beginPath();ctx.ellipse(pz.x,pz.y-13*s,6*s,3*s,0,0,6.28);ctx.fill();
+      ctx.fillStyle='#ffb366';
+      for(let i=0;i<4;i++){
+        const fr=((G.time*(0.5+0.2*i)+pr.ph+i*0.7)%1);
+        ctx.globalAlpha=1-fr;
+        ctx.fillRect(pz.x+Math.sin(G.time*2+i*2)*8*s,pz.y-13*s-fr*40*s,2.2*s,2.2*s);
+      }
+      ctx.globalAlpha=1;
+      break;}
+    case 'rig':{ // 採掘リグ(点滅灯つき)
+      groundShadow(pz.x,pz.y+2*s,24*s,0.4);
+      const hh=70*s;
+      ctx.strokeStyle='#ffd54f';ctx.lineWidth=1.8*s;ctx.shadowColor='#ffd54f';ctx.shadowBlur=5;
+      ctx.beginPath();
+      ctx.moveTo(pz.x-18*s,pz.y);ctx.lineTo(pz.x,pz.y-hh);ctx.lineTo(pz.x+18*s,pz.y);
+      ctx.moveTo(pz.x-12*s,pz.y-hh*0.33);ctx.lineTo(pz.x+12*s,pz.y-hh*0.33);
+      ctx.moveTo(pz.x-7*s,pz.y-hh*0.66);ctx.lineTo(pz.x+7*s,pz.y-hh*0.66);
+      ctx.moveTo(pz.x-12*s,pz.y-hh*0.33);ctx.lineTo(pz.x+7*s,pz.y-hh*0.66);
+      ctx.moveTo(pz.x+12*s,pz.y-hh*0.33);ctx.lineTo(pz.x-7*s,pz.y-hh*0.66);
+      ctx.stroke();
+      if((G.time*2+pr.ph|0)%2){ctx.fillStyle='#ff2b4e';ctx.shadowColor='#ff2b4e';ctx.shadowBlur=12;
+        ctx.beginPath();ctx.arc(pz.x,pz.y-hh-4*s,3.5*s,0,6.28);ctx.fill();}
+      break;}
+    case 'arcgate':{ // リングワールドの大アーチ
+      groundShadow(pz.x,pz.y+2*s,46*s,0.35);
+      const rr=(pr.big?72:52)*s;
+      ctx.strokeStyle='#00e5ff';ctx.lineWidth=4*s;ctx.shadowColor='#00e5ff';ctx.shadowBlur=14;
+      ctx.beginPath();ctx.arc(pz.x,pz.y,rr,Math.PI,0);ctx.stroke();
+      ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=1.5*s;
+      ctx.beginPath();ctx.arc(pz.x,pz.y,rr*0.85,Math.PI,0);ctx.stroke();
+      // アーチ内の流れる光
+      const fl=(G.time*0.8+pr.ph)%1;
+      const fa=Math.PI+fl*Math.PI;
+      ctx.fillStyle='#fff';ctx.shadowBlur=10;
+      ctx.beginPath();ctx.arc(pz.x+Math.cos(fa)*rr,pz.y+Math.sin(fa)*rr,3*s,0,6.28);ctx.fill();
+      break;}
+    case 'orb':{ // 浮遊オーブ
+      const fy=pz.y-(36+20*rndSeeded(sd))*s+Math.sin(G.time*1.2+pr.ph)*8*s;
+      groundShadow(pz.x,pz.y,10*s,0.25);
+      ctx.strokeStyle='#00e5ff';ctx.lineWidth=1.8*s;ctx.shadowColor='#00e5ff';ctx.shadowBlur=12;
+      const gr2=ctx.createRadialGradient(pz.x-3*s,fy-3*s,1,pz.x,fy,11*s);
+      gr2.addColorStop(0,'rgba(200,255,255,0.95)');gr2.addColorStop(1,'rgba(0,90,140,0.75)');
+      ctx.fillStyle=gr2;
+      ctx.beginPath();ctx.arc(pz.x,fy,11*s,0,6.28);ctx.fill();ctx.stroke();
+      ctx.beginPath();ctx.ellipse(pz.x,fy,17*s,5*s,-0.3,0,6.28);ctx.stroke();
+      break;}
+    case 'statue':{ // 古代宇宙人像
+      groundShadow(pz.x,pz.y+2*s,20*s,0.45);
+      ctx.fillStyle='rgba(25,25,40,0.97)';ctx.strokeStyle='#8899bb';ctx.lineWidth=2*s;
+      ctx.shadowColor='#8899bb';ctx.shadowBlur=4;
+      // 台座+頭像(モアイ風)
+      ctx.fillRect(pz.x-16*s,pz.y-14*s,32*s,14*s);ctx.strokeRect(pz.x-16*s,pz.y-14*s,32*s,14*s);
+      ctx.beginPath();
+      ctx.moveTo(pz.x-11*s,pz.y-14*s);ctx.lineTo(pz.x-13*s,pz.y-52*s);ctx.quadraticCurveTo(pz.x,pz.y-64*s,pz.x+13*s,pz.y-52*s);ctx.lineTo(pz.x+11*s,pz.y-14*s);ctx.closePath();
+      ctx.fill();ctx.stroke();
+      // 目が光る
+      const gl=0.5+0.5*Math.sin(G.time*2+pr.ph);
+      ctx.fillStyle=`rgba(0,229,255,${gl})`;ctx.shadowColor='#00e5ff';ctx.shadowBlur=10;
+      ctx.fillRect(pz.x-8*s,pz.y-46*s,5*s,2.5*s);ctx.fillRect(pz.x+3*s,pz.y-46*s,5*s,2.5*s);
+      break;}
+    case 'scraptower':{ // スクラップタワー
+      groundShadow(pz.x,pz.y+2*s,22*s,0.45);
+      ctx.strokeStyle='#00ffb3';ctx.fillStyle='rgba(18,22,20,0.95)';ctx.lineWidth=1.5*s;
+      ctx.shadowColor='#00ffb3';ctx.shadowBlur=5;
+      let ty=pz.y,tw=34*s;
+      for(let i=0;i<5;i++){
+        const th=(12+6*rndSeeded(sd+i))*s,off=(rndSeeded(sd*2+i)-0.5)*10*s;
+        ctx.fillRect(pz.x-tw/2+off,ty-th,tw,th);ctx.strokeRect(pz.x-tw/2+off,ty-th,tw,th);
+        ty-=th;tw*=0.78;
+      }
+      ctx.strokeStyle='#ff2b4e';ctx.beginPath();ctx.moveTo(pz.x,ty);ctx.lineTo(pz.x,ty-14*s);ctx.stroke();
+      if((G.time*3|0)%2){ctx.fillStyle='#ff2b4e';ctx.beginPath();ctx.arc(pz.x,ty-15*s,2.5*s,0,6.28);ctx.fill();}
+      break;}
+    case 'firebarrel':{ // ドラム缶の焚き火
+      groundShadow(pz.x,pz.y+2*s,12*s,0.4);
+      ctx.fillStyle='rgba(30,20,25,0.97)';ctx.strokeStyle='#996655';ctx.lineWidth=1.5*s;
+      ctx.fillRect(pz.x-8*s,pz.y-16*s,16*s,16*s);ctx.strokeRect(pz.x-8*s,pz.y-16*s,16*s,16*s);
+      // 炎(ゆらぎ)
+      ctx.save();ctx.globalCompositeOperation='lighter';
+      for(let i=0;i<3;i++){
+        const fh=(14+8*Math.sin(G.time*(6+i)+pr.ph+i*2))*s;
+        ctx.fillStyle=['#ff5222','#ff9100','#ffd54f'][i];
+        ctx.globalAlpha=0.7-i*0.15;
+        ctx.beginPath();
+        ctx.moveTo(pz.x-(7-i*2)*s,pz.y-16*s);
+        ctx.quadraticCurveTo(pz.x+Math.sin(G.time*7+i)*4*s,pz.y-16*s-fh,pz.x+(7-i*2)*s,pz.y-16*s);
+        ctx.closePath();ctx.fill();
+      }
+      ctx.restore();
+      break;}
+    case 'warnsign':{ // 警告標識
+      groundShadow(pz.x,pz.y,8*s,0.35);
+      ctx.strokeStyle='#556';ctx.lineWidth=2*s;
+      ctx.beginPath();ctx.moveTo(pz.x,pz.y);ctx.lineTo(pz.x,pz.y-30*s);ctx.stroke();
+      const bl=(G.time*3+pr.ph|0)%2;
+      ctx.save();ctx.translate(pz.x,pz.y-42*s);ctx.rotate(Math.PI/4);
+      ctx.fillStyle='rgba(30,25,5,0.95)';ctx.strokeStyle=bl?'#ffd54f':'#665511';ctx.lineWidth=2.5*s;
+      ctx.shadowColor='#ffd54f';ctx.shadowBlur=bl?12:0;
+      ctx.fillRect(-12*s,-12*s,24*s,24*s);ctx.strokeRect(-12*s,-12*s,24*s,24*s);
+      ctx.restore();
+      if(s>0.5){ctx.fillStyle=bl?'#ffd54f':'#886611';ctx.font=`900 ${13*s}px sans-serif`;
+        ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('!',pz.x,pz.y-42*s);}
+      break;}
+    case 'portal':{ // 回転ポータルリング
+      const rr=(pr.big?40:28)*s;
+      const fy=pz.y-rr-10*s;
+      groundShadow(pz.x,pz.y,rr*0.8,0.3);
+      ctx.save();
+      const grd2=ctx.createRadialGradient(pz.x,fy,0,pz.x,fy,rr);
+      grd2.addColorStop(0,'rgba(196,0,255,0.35)');grd2.addColorStop(0.8,'rgba(60,0,90,0.15)');grd2.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=grd2;ctx.beginPath();ctx.arc(pz.x,fy,rr,0,6.28);ctx.fill();
+      ctx.strokeStyle='#c400ff';ctx.lineWidth=2.5*s;ctx.shadowColor='#c400ff';ctx.shadowBlur=12;
+      ctx.setLineDash([8*s,5*s]);ctx.lineDashOffset=-G.time*30;
+      ctx.beginPath();ctx.arc(pz.x,fy,rr,0,6.28);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle='rgba(255,255,255,0.6)';ctx.lineWidth=1.2*s;
+      ctx.beginPath();ctx.arc(pz.x,fy,rr*0.6,G.time*2,G.time*2+4.5);ctx.stroke();
+      ctx.restore();
+      break;}
+    case 'shard':{ // 浮遊シャード群
+      const fy=pz.y-(24+22*rndSeeded(sd))*s+Math.sin(G.time*1.8+pr.ph)*6*s;
+      groundShadow(pz.x,pz.y,7*s,0.22);
+      ctx.save();ctx.translate(pz.x,fy);ctx.rotate(G.time*0.6+pr.ph);
+      ctx.strokeStyle='#ff80ff';ctx.fillStyle='rgba(60,0,90,0.6)';ctx.lineWidth=1.5*s;
+      ctx.shadowColor='#ff80ff';ctx.shadowBlur=8;
+      ctx.beginPath();ctx.moveTo(0,-11*s);ctx.lineTo(6*s,4*s);ctx.lineTo(-6*s,4*s);ctx.closePath();ctx.fill();ctx.stroke();
+      ctx.restore();
+      break;}
+    case 'tether':{ // 天へ伸びるエネルギー柱
+      groundShadow(pz.x,pz.y,12*s,0.3);
+      const pw2=(3+2*Math.sin(G.time*2.5+pr.ph))*s;
+      ctx.save();ctx.globalCompositeOperation='lighter';
+      const lg=ctx.createLinearGradient(0,pz.y,0,pz.y-190*s);
+      lg.addColorStop(0,css(G.col.acc,0.85));lg.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=lg;
+      ctx.fillRect(pz.x-pw2,pz.y-190*s,pw2*2,190*s);
+      ctx.restore();
+      ctx.fillStyle=css(G.col.acc,0.9);ctx.shadowColor=css(G.col.acc);ctx.shadowBlur=14;
+      ctx.beginPath();ctx.ellipse(pz.x,pz.y,10*s,4*s,0,0,6.28);ctx.fill();
+      break;}
+    case 'lamp':{ // 道沿いの街灯
+      const hh=76*s,arm=26*s*-Math.sign(pr.xoff);
+      ctx.strokeStyle='#445';ctx.lineWidth=2.5*s;
+      ctx.beginPath();ctx.moveTo(pz.x,pz.y);ctx.lineTo(pz.x,pz.y-hh);ctx.quadraticCurveTo(pz.x+arm*0.7,pz.y-hh-8*s,pz.x+arm,pz.y-hh-6*s);ctx.stroke();
+      const lc=css(G.col.grid);
+      ctx.fillStyle=lc;ctx.shadowColor=lc;ctx.shadowBlur=16;
+      ctx.beginPath();ctx.arc(pz.x+arm,pz.y-hh-6*s,3.5*s,0,6.28);ctx.fill();
+      ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=0.10;
+      ctx.fillStyle=lc;
+      ctx.beginPath();ctx.moveTo(pz.x+arm,pz.y-hh-6*s);ctx.lineTo(pz.x+arm-16*s,pz.y);ctx.lineTo(pz.x+arm+16*s,pz.y);ctx.closePath();ctx.fill();
+      ctx.restore();
+      break;}
+    case 'gate':{ // 道をまたぐゾーンゲート
+      const gw=ROAD_EDGE+45,gh=120*s;
+      const a=proj(pr.t,-gw),b=proj(pr.t,gw);
+      const gc2=css(G.col.grid);
+      ctx.strokeStyle=gc2;ctx.lineWidth=5*s;ctx.shadowColor=gc2;ctx.shadowBlur=14;
+      ctx.beginPath();
+      ctx.moveTo(a.x,a.y);ctx.lineTo(a.x,a.y-gh);
+      ctx.moveTo(b.x,b.y);ctx.lineTo(b.x,b.y-gh);
+      ctx.stroke();
+      ctx.fillStyle='rgba(12,6,26,0.92)';
+      ctx.fillRect(a.x,a.y-gh-24*s,b.x-a.x,24*s);
+      ctx.strokeRect(a.x,a.y-gh-24*s,b.x-a.x,24*s);
+      if(s>0.3){
+        ctx.fillStyle=gc2;ctx.font=`900 ${17*s}px "Hiragino Kaku Gothic ProN",sans-serif`;
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(`— ${pr.line} —`,(a.x+b.x)/2,a.y-gh-12*s);
+      }
+      // 支柱の点滅灯
+      for(const px3 of [a.x,b.x]){
+        if((G.time*4|0)%2){ctx.fillStyle='#fff';ctx.shadowBlur=10;
+          ctx.beginPath();ctx.arc(px3,a.y-gh,3*s,0,6.28);ctx.fill();}
+      }
+      break;}
+    case 'ruin':default:{
+      const hh=rndSeeded(sd)*40+30;
+      ctx.fillStyle='rgba(8,4,20,0.95)';
+      ctx.fillRect(pz.x-14*s,pz.y-hh*s,28*s,hh*s);
+      ctx.strokeStyle=css(G.col.grid,0.4);ctx.lineWidth=1;
+      ctx.strokeRect(pz.x-14*s,pz.y-hh*s,28*s,hh*s);
+      ctx.fillStyle=css(G.col.acc,0.5);
+      for(let wy=6;wy<hh-4;wy+=9)if((wy*7|0)%3)ctx.fillRect(pz.x-8*s,pz.y-(hh-wy)*s,4*s,3*s);
+      break;}
+  }
+  ctx.restore();
+}
+function rndSeeded(x){return Math.abs(Math.sin(x*127.1)*43758.5)%1;}
+
+function drawDriveThru(g){
+  const s=proj(g.t,0).s;
+  const reveal=!g.fast||g.t>0.55;
+  // 店舗(通常は片側のみ・高速版は両側に建ち正解側が直前に判明)
+  const sides=g.fast?[-1,1]:[g.side];
+  for(const side of sides)drawShop(g,side,side===g.side,reveal);
+  // 正解レーンの誘導(強発光ストリップ+エッジライン+流れるシェブロン+受取パッド)
+  if(reveal){
+    const lo=g.correct*LANE_W;
+    const t1=Math.min(1.0,g.t),t0=Math.max(0.06,g.t-0.5);
+    const pulse=0.7+0.3*Math.sin(G.time*7);
+    ctx.save();ctx.globalCompositeOperation='lighter';
+    // 面(グラデーションで受取地点ほど明るく)
+    const a1=proj(t0,lo-LANE_W*0.42),a2=proj(t0,lo+LANE_W*0.42),b1=proj(t1,lo-LANE_W*0.42),b2=proj(t1,lo+LANE_W*0.42);
+    const sg=ctx.createLinearGradient(0,a1.y,0,b1.y);
+    sg.addColorStop(0,`rgba(0,255,179,${0.10*pulse})`);
+    sg.addColorStop(1,`rgba(0,255,179,${0.38*pulse})`);
+    ctx.fillStyle=sg;
+    ctx.beginPath();ctx.moveTo(a1.x,a1.y);ctx.lineTo(b1.x,b1.y);ctx.lineTo(b2.x,b2.y);ctx.lineTo(a2.x,a2.y);ctx.closePath();ctx.fill();
+    // 両サイドの発光エッジライン
+    ctx.strokeStyle='#00ffb3';ctx.shadowColor='#00ffb3';
+    for(const xo of [lo-LANE_W*0.42,lo+LANE_W*0.42]){
+      const p1=proj(t0,xo),p2=proj(t1,xo);
+      ctx.globalAlpha=0.9*pulse;ctx.lineWidth=4;ctx.shadowBlur=18;
+      ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();
+    }
+    // レーンを流れるシェブロン(∨が受取地点へ向かって流れる)
+    ctx.globalAlpha=1;ctx.lineWidth=3.5;ctx.shadowBlur=12;
+    for(let i=0;i<5;i++){
+      const f=((i/5)+G.time*0.55)%1;
+      const tt=t0+f*(t1-t0);
+      const cA=proj(tt,lo-LANE_W*0.26),cB=proj(tt+0.018,lo),cC=proj(tt,lo+LANE_W*0.26);
+      ctx.globalAlpha=(0.35+0.6*f)*pulse;
+      ctx.beginPath();ctx.moveTo(cA.x,cA.y);ctx.lineTo(cB.x,cB.y);ctx.lineTo(cC.x,cC.y);ctx.stroke();
+    }
+    // 受取パッド(店の窓の前で脈動する発光エリア)
+    const pz=proj(g.t,lo);
+    const pr2=LANE_W*0.5*pz.xe*(1+0.12*Math.sin(G.time*7));
+    const pg2=ctx.createRadialGradient(pz.x,pz.y,0,pz.x,pz.y,pr2);
+    pg2.addColorStop(0,`rgba(180,255,225,${0.55*pulse})`);
+    pg2.addColorStop(0.6,`rgba(0,255,179,${0.30*pulse})`);
+    pg2.addColorStop(1,'rgba(0,255,179,0)');
+    ctx.globalAlpha=1;ctx.fillStyle=pg2;
+    ctx.beginPath();ctx.ellipse(pz.x,pz.y,pr2,pr2*0.4,0,0,6.28);ctx.fill();
+    ctx.strokeStyle='#aaffe0';ctx.lineWidth=2.5;ctx.shadowBlur=14;ctx.globalAlpha=0.9*pulse;
+    ctx.beginPath();ctx.ellipse(pz.x,pz.y,pr2*0.8,pr2*0.32,0,0,6.28);ctx.stroke();
+    ctx.restore();
+    // ▼マーカー(大きく・くっきり)
+    ctx.save();
+    const ay=Math.sin(G.time*6)*5*s;
+    ctx.fillStyle='#00ffb3';ctx.shadowColor='#00ffb3';ctx.shadowBlur=18;
+    ctx.font=`900 ${36*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('▼',pz.x,pz.y-60*s+ay);
+    ctx.restore();
+  }
+  // 頭上アーチ看板(会社名+店側への矢印)
+  if(s>0.25){
+    const pz=proj(g.t,0);
+    ctx.save();
+    ctx.fillStyle='rgba(10,5,25,0.9)';ctx.strokeStyle='#ffd54f';ctx.lineWidth=1.5*s;
+    ctx.shadowColor='#ffd54f';ctx.shadowBlur=8;
+    const w2=380*s;
+    ctx.fillRect(pz.x-w2,pz.y-140*s,w2*2,34*s);ctx.strokeRect(pz.x-w2,pz.y-140*s,w2*2,34*s);
+    ctx.fillStyle='#ffd54f';ctx.font=`900 ${19*s}px "Hiragino Kaku Gothic ProN",sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('銀河複合企業ネオン・バーガー(株) DRIVE-THRU',pz.x,pz.y-123*s);
+    // 店側を指す矢印
+    const dir=reveal?(g.side<0?'◀◀ 店は左':'店は右 ▶▶'):'店は…どっち?';
+    ctx.fillStyle=reveal?'#00ffb3':'#ff2bd6';
+    ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=10;
+    ctx.font=`900 ${18*s}px "Hiragino Kaku Gothic ProN",sans-serif`;
+    ctx.fillText(dir,pz.x,pz.y-156*s);
+    ctx.restore();
+  }
+}
+function drawShop(g,side,open,reveal){
+  const pz=proj(g.t,side*(ROAD_EDGE+130));
+  const s=pz.s;
+  const col=reveal?(open?'#00ffb3':'#ff2bd6'):'#ffd54f';
+  const w2=100*s,h2=88*s;
+  const face=-side; // 道路に面した側
+  groundShadow(pz.x,pz.y+4*s,w2*1.1,0.45);
+  ctx.save();ctx.translate(pz.x,pz.y);
+  // 本体
+  ctx.fillStyle='rgba(15,8,30,0.94)';
+  ctx.strokeStyle=col;ctx.lineWidth=2.5*s;ctx.shadowColor=col;ctx.shadowBlur=12*s;
+  ctx.fillRect(-w2,-h2,w2*2,h2);ctx.strokeRect(-w2,-h2,w2*2,h2);
+  ctx.shadowBlur=0;
+  // ストライプのひさし
+  const aw=(w2*2+14*s)/6;
+  for(let i=0;i<6;i++){
+    ctx.fillStyle=i%2?css(h2r(col),0.9):'rgba(255,255,255,0.85)';
+    ctx.fillRect(-w2-7*s+i*aw,-h2-11*s,aw,11*s);
+  }
+  // サービス窓(道路側)+手を振る店員
+  const wx=face*w2*0.5;
+  ctx.fillStyle='rgba(255,240,180,0.28)';
+  ctx.strokeStyle=col;ctx.lineWidth=1.5*s;
+  ctx.fillRect(wx-19*s,-56*s,38*s,38*s);ctx.strokeRect(wx-19*s,-56*s,38*s,38*s);
+  ctx.strokeStyle='#aaffcc';ctx.lineWidth=2*s;ctx.shadowColor='#aaffcc';ctx.shadowBlur=5;
+  ctx.beginPath();ctx.arc(wx,-42*s,6*s,0,6.28);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(wx,-36*s);ctx.lineTo(wx,-26*s);ctx.stroke();
+  const wave=(open&&reveal)?Math.sin(G.time*8)*5*s:0;
+  ctx.beginPath();ctx.moveTo(wx,-33*s);ctx.lineTo(wx+face*11*s,-40*s+wave);ctx.stroke();
+  // 屋上のポールサイン(メニュー名)
+  const label=reveal?(open?g.menu:'CLOSED'):'???';
+  const sw=Math.max(80*s,label.length*16*s+18*s);
+  ctx.strokeStyle='rgba(120,130,170,0.9)';ctx.lineWidth=2.5*s;
+  ctx.beginPath();ctx.moveTo(0,-h2-11*s);ctx.lineTo(0,-h2-34*s);ctx.stroke();
+  const pu=0.75+0.25*Math.sin(G.time*3);
+  ctx.fillStyle='rgba(10,5,20,0.94)';ctx.strokeStyle=col;ctx.lineWidth=2*s;
+  ctx.shadowColor=col;ctx.shadowBlur=12*pu;
+  ctx.fillRect(-sw/2,-h2-58*s,sw,26*s);ctx.strokeRect(-sw/2,-h2-58*s,sw,26*s);
+  ctx.shadowBlur=0;
+  if(s>0.32){
+    ctx.fillStyle=col;ctx.font=`900 ${16*s}px "Hiragino Kaku Gothic ProN",sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(label,0,-h2-45*s);
+    // 壁のOPEN/CLOSEDサイン
+    ctx.font=`900 ${15*s}px sans-serif`;
+    ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=8;
+    ctx.fillText(reveal?(open?'OPEN':'CLOSED'):'?',-face*w2*0.45,-h2*0.75);
+  }
+  // 受け取りアーム(開店側のみ: 窓から端レーンへトレイが伸びる)
+  if(open&&reveal){
+    const lanePz=proj(g.t,g.correct*LANE_W);
+    ctx.strokeStyle='#ffd54f';ctx.lineWidth=2.5*s;ctx.shadowColor='#ffd54f';ctx.shadowBlur=8;
+    ctx.beginPath();ctx.moveTo(wx+face*19*s,-37*s);
+    ctx.lineTo(lanePz.x-pz.x,-30*s);ctx.stroke();
+    // トレイの上の光る品物
+    const bx=lanePz.x-pz.x;
+    ctx.fillStyle='#ffd54f';
+    ctx.beginPath();ctx.arc(bx,-34*s+Math.sin(G.time*5)*3*s,5*s,0,6.28);ctx.fill();
+  }
+  ctx.restore();
+}
+function drawBuilding(g){
+  const pz=proj(g.t,0);
+  const s=pz.s;
+  ctx.save();ctx.translate(pz.x,pz.y);
+  if(!g.exploded){
+    const w2=270*s,h2=170*s;
+    ctx.fillStyle='rgba(12,6,26,0.96)';
+    ctx.strokeStyle='#ff5252';ctx.lineWidth=2.5*s;
+    ctx.shadowColor='#ff5252';ctx.shadowBlur=12*s;
+    ctx.fillRect(-w2,-h2,w2*2,h2);ctx.strokeRect(-w2,-h2,w2*2,h2);
+    // 窓
+    ctx.fillStyle=css(G.col.acc,0.45);
+    for(let wy=-h2+10*s;wy<-8*s;wy+=16*s)for(let wx=-w2+10*s;wx<w2-10*s;wx+=20*s)
+      if(((wx*3+wy*7)|0)%3)ctx.fillRect(wx,wy,8*s,6*s);
+    // 社名+警告
+    if(s>0.3){
+      ctx.fillStyle='#ff5252';ctx.font=`900 ${20*s}px "Hiragino Kaku Gothic ProN",sans-serif`;
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(g.name,0,-h2+20*s);
+      if((G.time*4|0)%2){ctx.fillStyle='#ffd54f';ctx.font=`900 ${24*s}px "Hiragino Kaku Gothic ProN",sans-serif`;ctx.fillText('⚠ 進路封鎖 ⚠',0,-h2*0.5);}
+    }
+    // ロックオン照準(ロケット発射後・着弾まで)
+    if(g.fired){
+      const pu=1+0.15*Math.sin(G.time*18);
+      const rr=60*s*pu;
+      ctx.save();ctx.translate(0,-h2*0.5);
+      ctx.strokeStyle='#ff2b4e';ctx.lineWidth=3*s;
+      ctx.shadowColor='#ff2b4e';ctx.shadowBlur=16;
+      ctx.beginPath();ctx.arc(0,0,rr,0,6.28);ctx.stroke();
+      for(let i=0;i<4;i++){
+        const a=i*Math.PI/2+G.time*3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a)*rr*0.75,Math.sin(a)*rr*0.75);
+        ctx.lineTo(Math.cos(a)*rr*1.2,Math.sin(a)*rr*1.2);
+        ctx.stroke();
+      }
+      if((G.time*6|0)%2){
+        ctx.fillStyle='#ff2b4e';ctx.font=`900 ${19*s}px sans-serif`;
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText('LOCK-ON',0,-rr-16*s);
+      }
+      ctx.restore();
+    }
+  }else{
+    // 瓦礫(燃えながら崩れる)
+    const fade=Math.max(0,1-g.expT/1.4);
+    ctx.globalAlpha=fade;
+    for(let k=0;k<12;k++){
+      const rx=rndSeeded(k*3.3)*520-260,rh=rndSeeded(k*7.7)*26+6;
+      ctx.fillStyle='rgba(40,30,50,0.85)';
+      ctx.fillRect(rx*s,-rh*s,26*s,rh*s);
+      if(k%3===0){ // 残り火
+        ctx.fillStyle=`rgba(255,${120+80*Math.sin(G.time*9+k)},40,${fade*0.8})`;
+        ctx.fillRect(rx*s+8*s,-rh*s-3*s,7*s,4*s);
+      }
+    }
+  }
+  ctx.restore();
+}
+function drawRocket(r){
+  if(r.delay>0)return;
+  const pz=proj(r.t,r.xoff||0);
+  const s=pz.s;
+  ctx.save();ctx.translate(pz.x,pz.y-20*s);
+  // 排気炎(ゆらめく)
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  const fl=10+6*Math.sin(G.time*40+r.t*50);
+  const fg=ctx.createLinearGradient(0,8*s,0,(8+fl*2)*s);
+  fg.addColorStop(0,'rgba(255,255,255,0.95)');fg.addColorStop(0.4,'rgba(255,180,60,0.8)');fg.addColorStop(1,'rgba(255,80,20,0)');
+  ctx.fillStyle=fg;
+  ctx.beginPath();ctx.moveTo(-4*s,8*s);ctx.lineTo(0,(8+fl*2)*s);ctx.lineTo(4*s,8*s);ctx.closePath();ctx.fill();
+  ctx.restore();
+  // 本体(大きめ・白熱)
+  ctx.fillStyle='#fff';ctx.strokeStyle='#ff9100';ctx.lineWidth=2.5;
+  ctx.shadowColor='#ff9100';ctx.shadowBlur=18;
+  ctx.beginPath();ctx.moveTo(0,-16*s);ctx.lineTo(6*s,4*s);ctx.lineTo(6*s,9*s);ctx.lineTo(-6*s,9*s);ctx.lineTo(-6*s,4*s);ctx.closePath();
+  ctx.fill();ctx.stroke();
+  // フィン
+  ctx.fillStyle='#ff5222';
+  ctx.beginPath();ctx.moveTo(-6*s,9*s);ctx.lineTo(-11*s,13*s);ctx.lineTo(-6*s,3*s);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(6*s,9*s);ctx.lineTo(11*s,13*s);ctx.lineTo(6*s,3*s);ctx.closePath();ctx.fill();
+  ctx.restore();
+}
+function drawPlayer(){
+  const p=G.player;
+  const x=playerX(),y=playerY();
+  if(p.inv>0&&(G.time*10|0)%2)return; // 無敵点滅
+  const bob=Math.sin(G.time*3)*3;
+  // 浮遊感を出す接地影(ホバーで伸縮)
+  groundShadow(x,y+42,46-bob*2.5,0.5);
+  ctx.save();ctx.translate(x,y);
+  const tilt=(p.lane-p.laneF)*-0.35;
+  ctx.rotate(tilt);
+  ctx.translate(0,bob);
+  // ビーム
+  ctx.save();ctx.globalAlpha=0.18+0.08*Math.sin(G.time*7);
+  const bg=ctx.createLinearGradient(0,10,0,64);
+  bg.addColorStop(0,G.bonus?'#ffd54f':'#00e5ff');bg.addColorStop(1,'rgba(0,229,255,0)');
+  ctx.fillStyle=bg;
+  ctx.beginPath();ctx.moveTo(-12,8);ctx.lineTo(12,8);ctx.lineTo(30,64);ctx.lineTo(-30,64);ctx.closePath();ctx.fill();
+  ctx.restore();
+  // 本体(クロム)
+  const grd=ctx.createLinearGradient(0,-14,0,12);
+  grd.addColorStop(0,'#e8f4ff');grd.addColorStop(0.5,'#7080a0');grd.addColorStop(1,'#202038');
+  ctx.fillStyle=grd;
+  ctx.strokeStyle=G.bonus?'#ffd54f':'#ff2bd6';ctx.lineWidth=2.5;
+  ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=16;
+  ctx.beginPath();ctx.ellipse(0,0,42,14,0,0,6.28);ctx.fill();ctx.stroke();
+  // ドーム
+  ctx.beginPath();ctx.arc(0,-9,16,Math.PI,0);
+  const dg=ctx.createLinearGradient(0,-25,0,-6);
+  dg.addColorStop(0,'rgba(0,229,255,0.9)');dg.addColorStop(1,'rgba(0,229,255,0.25)');
+  ctx.fillStyle=dg;ctx.fill();
+  ctx.strokeStyle='#00e5ff';ctx.lineWidth=2;ctx.stroke();
+  // 中の宇宙人
+  ctx.fillStyle='#aaffcc';
+  ctx.beginPath();ctx.arc(0,-12,5,0,6.28);ctx.fill();
+  ctx.fillStyle='#052';ctx.fillRect(-3,-14,2,2);ctx.fillRect(1,-14,2,2);
+  // ネオンリング灯
+  for(let i=-2;i<=2;i++){
+    const on=((G.time*8|0)+i)%5===0;
+    ctx.fillStyle=on?'#ffffff':(G.bonus?'#ffd54f':'#ff2bd6');
+    ctx.shadowBlur=on?12:6;
+    ctx.beginPath();ctx.arc(i*16,6,3,0,6.28);ctx.fill();
+  }
+  // シールド
+  if(p.shield){
+    ctx.strokeStyle='rgba(0,229,255,0.7)';ctx.lineWidth=2;
+    ctx.shadowColor='#00e5ff';ctx.shadowBlur=14;
+    ctx.beginPath();ctx.ellipse(0,-4,52,30,0,0,6.28);ctx.stroke();
+  }
+  ctx.restore();
+  // ブースト残像
+  if(G.pw.boost>0||G.bonus){
+    ctx.save();ctx.globalCompositeOperation='lighter';
+    for(let i=1;i<=3;i++){
+      ctx.globalAlpha=0.12/i;
+      ctx.strokeStyle=G.bonus?'#ffd54f':'#ff9100';ctx.lineWidth=2;
+      ctx.beginPath();ctx.ellipse(x,y+bob+i*10,42+i*4,14,0,0,6.28);ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+function drawParticles(){
+  for(const q of G.parts){
+    ctx.save();
+    if(q.add)ctx.globalCompositeOperation='lighter';
+    ctx.globalAlpha=clamp(q.life,0,1);
+    if(q.fire){ // 火球: 放射グラデーションの発光球
+      const r2=q.size*(1.4-q.life*0.4);
+      const fg=ctx.createRadialGradient(q.x,q.y,0,q.x,q.y,r2);
+      fg.addColorStop(0,'rgba(255,255,240,0.95)');
+      fg.addColorStop(0.35,q.col);
+      fg.addColorStop(1,'rgba(255,60,10,0)');
+      ctx.fillStyle=fg;
+      ctx.beginPath();ctx.arc(q.x,q.y,r2,0,6.28);ctx.fill();
+    }else{
+      ctx.fillStyle=q.col;ctx.shadowColor=q.col;ctx.shadowBlur=6;
+      ctx.fillRect(q.x-q.size/2,q.y-q.size/2,q.size,q.size);
+    }
+    ctx.restore();
+  }
+}
+function drawRings(){ // 爆発の衝撃波リング
+  if(!G.rings.length)return;
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  for(const r2 of G.rings){
+    ctx.globalAlpha=clamp(r2.life*1.6,0,1);
+    ctx.strokeStyle=r2.col;ctx.lineWidth=r2.lw||4;
+    ctx.shadowColor=r2.col;ctx.shadowBlur=18;
+    ctx.beginPath();ctx.ellipse(r2.x,r2.y,r2.r,r2.r*0.55,0,0,6.28);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- HUD & オーバーレイ ----------
+function drawHUD(){
+  if(G.state==='title'){drawTitle();return;}
+  const p=G.player;
+  // スコア
+  neonText(`SCORE ${G.score}/42`,18,32,30,'#00e5ff','left');
+  // ゾーン・レベル
+  neonText(`ZONE ${G.zoneIdx+1} ${ZONES[G.zoneIdx].name}`,W-18,28,20,'#ff2bd6','right');
+  // 距離・タイム
+  ctx.save();ctx.font='700 17px sans-serif';ctx.fillStyle='rgba(255,255,255,0.8)';ctx.textAlign='center';
+  ctx.fillText(`${(G.dist|0)}m   TIME ${fmtTime(G.time)}${G.answered?'  [42到達 '+fmtTime(G.t42)+']':''}`,W/2,22);
+  ctx.restore();
+  // HP
+  ctx.save();
+  ctx.font='21px sans-serif';ctx.textAlign='left';
+  for(let i=0;i<3;i++){
+    ctx.fillStyle=i<p.hp?'#ff2b4e':'rgba(255,255,255,0.15)';
+    ctx.shadowColor='#ff2b4e';ctx.shadowBlur=i<p.hp?8:0;
+    ctx.fillText('♥',16+i*26,60);
+  }
+  ctx.restore();
+  if(p.shield)neonText('◎SHIELD',118,56,15,'#00e5ff','left');
+  if(G.combo>0)neonText(`COMBO ${G.combo}`,W-18,54,16,'#ffd54f','right');
+  // パワーアップゲージ
+  const gauges=[['boost','#ff9100','ブースト',6],['magnet','#ff2bd6','マグネット',8],['slow','#7c4dff','スロー',5]];
+  let gy=H-22;
+  for(const[k,col,label,max]of gauges){
+    if(G.pw[k]>0){
+      ctx.save();
+      ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(16,gy-11,150,14);
+      ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=6;
+      ctx.fillRect(16,gy-11,150*(G.pw[k]/max),14);
+      ctx.font='700 14px sans-serif';ctx.fillStyle='#fff';ctx.textAlign='left';
+      ctx.fillText(label,174,gy+1);
+      ctx.restore();
+      gy-=22;
+    }
+  }
+  // 浮遊テキスト
+  for(const t of G.texts){
+    ctx.save();ctx.globalAlpha=clamp(t.life,0,1);
+    neonText(t.txt,t.x,t.y,24,t.col);
+    ctx.restore();
+  }
+  // キャプション(路肩実況)
+  if(G.caption){
+    ctx.save();
+    ctx.globalAlpha=clamp(G.caption.t,0,1);
+    ctx.fillStyle='rgba(5,2,15,0.78)';
+    ctx.fillRect(0,H-70,W,40);
+    ctx.font='700 21px "Hiragino Kaku Gothic ProN",sans-serif';
+    ctx.fillStyle='#c8f8ff';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(G.caption.txt,W/2,H-50);
+    ctx.restore();
+  }
+  // ホログラム広告落下
+  if(G.holo){
+    const a=G.holo.t<0.3?G.holo.t/0.3:Math.max(0,1-(G.holo.t-1.6)/0.9);
+    const y=lerp(-90,140,Math.min(1,G.holo.t/0.4));
+    ctx.save();ctx.globalAlpha=a*0.85;
+    ctx.fillStyle='rgba(0,229,255,0.12)';
+    ctx.strokeStyle='#00e5ff';ctx.lineWidth=2;ctx.shadowColor='#00e5ff';ctx.shadowBlur=16;
+    ctx.fillRect(W/2-330,y,660,84);ctx.strokeRect(W/2-330,y,660,84);
+    ctx.font='900 23px "Hiragino Kaku Gothic ProN",sans-serif';ctx.fillStyle='#dffcff';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('【広告】'+G.holo.txt,W/2,y+42);
+    ctx.restore();
+  }
+}
+function drawOverlays(){
+  // フラッシュ
+  if(G.flash>0){
+    ctx.save();ctx.globalAlpha=G.flash*0.6;
+    ctx.fillStyle=G.flashCol;ctx.fillRect(0,0,W,H);
+    ctx.restore();
+  }
+  // ゾーンクリア
+  if(G.zoneFx>0){
+    const a=Math.min(1,G.zoneFx/0.5)*Math.min(1,(2.6-G.zoneFx)/0.3+0.01);
+    ctx.save();ctx.globalAlpha=clamp(a,0,1);
+    neonText('ZONE CLEAR',W/2,H*0.34,42,'#00ffb3');
+    neonText(`${G.zoneFxName} 突破`,W/2,H*0.34+44,18,'#ffffff');
+    if(G.zoneFxBonus)neonText('ノーミスボーナス +2',W/2,H*0.34+74,16,'#ffd54f');
+    ctx.restore();
+  }
+  // 42演出(ゲームを止めずにテキストのみ重ねる)
+  if(G.fx42>0){
+    const t=6-G.fx42;
+    const fade=Math.min(1,t*3)*clamp(G.fx42/0.8,0,1);
+    ctx.save();ctx.globalAlpha=fade;
+    const sc=t<0.5?lerp(2.6,1,t/0.5):1+Math.sin(t*3)*0.03;
+    ctx.translate(W/2,H*0.3);ctx.scale(sc,sc);
+    neonText('42',0,0,130,'#ffd54f');
+    ctx.restore();
+    if(t>0.7){
+      ctx.save();ctx.globalAlpha=clamp((t-0.7)/0.5,0,1)*clamp(G.fx42/0.8,0,1);
+      neonText('生命、宇宙、そして万物についての究極の答えに到達しました。',W/2,H*0.52,25,'#00e5ff');
+      neonText('……で、質問は何だっけ?',W/2,H*0.52+40,21,'#ffffff');
+      if(G.newRec.t42)neonText(`最速記録更新! ${fmtTime(G.t42)}`,W/2,H*0.52+78,22,'#ffd54f');
+      ctx.restore();
+    }
+  }
+  if(G.bonus&&G.state==='playing'){
+    ctx.save();ctx.globalAlpha=0.6+0.4*Math.sin(G.time*4);
+    neonText('BONUS FLIGHT',W/2,54,16,'#ffd54f');
+    ctx.restore();
+  }
+  // ゲームオーバー
+  if(G.state==='gameover'){
+    ctx.save();
+    ctx.fillStyle='rgba(5,2,15,0.72)';ctx.fillRect(0,0,W,H);
+    neonText('GAME OVER',W/2,H*0.26,52,'#ff2b4e');
+    neonText(`SCORE  ${G.score} / 42${G.newRec.score?'  NEW!':''}`,W/2,H*0.4,27,'#00e5ff');
+    neonText(`距離  ${G.dist|0} m`,W/2,H*0.4+44,22,'#ffffff');
+    neonText(`タイム  ${fmtTime(G.time)}`,W/2,H*0.4+78,22,'#ffffff');
+    if(G.answered)neonText(`42到達タイム ${fmtTime(G.t42)}${G.newRec.t42?'  ★最速更新!':''}`,W/2,H*0.4+114,20,'#ffd54f');
+    neonText(`ハイスコア ${best.score}   ベスト距離 ${best.dist|0}m`,W/2,H*0.4+152,17,'#ff2bd6');
+    if(best.t42!=null)neonText(`42最速 ${fmtTime(best.t42)}`,W/2,H*0.4+180,17,'#ffd54f');
+    if((G.time*2|0)%2)neonText('SPACE / タップ でリトライ',W/2,H*0.88,21,'#ffffff');
+    ctx.restore();
+  }
+}
+function drawTitle(){
+  ctx.save();
+  ctx.fillStyle='rgba(5,2,15,0.35)';ctx.fillRect(0,0,W,H);
+  const wob=Math.sin(G.time*2)*4;
+  neonText('RETROWAVE',W/2,H*0.22+wob,68,'#ff2bd6');
+  neonText('GALAXY DRIVE',W/2,H*0.22+70+wob,56,'#00e5ff');
+  neonText('〜 宇宙UFOドライブスルー 〜',W/2,H*0.22+128,20,'#ffd54f');
+  ctx.font='700 20px "Hiragino Kaku Gothic ProN",sans-serif';
+  ctx.fillStyle='rgba(255,255,255,0.85)';ctx.textAlign='center';
+  ctx.fillText('←→ / A D キー or 画面タップで左右移動',W/2,H*0.56);
+  ctx.fillText('結晶を集め、ドライブスルーはお店に接するレーンへ',W/2,H*0.56+30);
+  ctx.fillText('目指せ、究極の答え「42」',W/2,H*0.56+60);
+  neonText(`ハイスコア ${best.score}/42   ベスト距離 ${best.dist|0}m`,W/2,H*0.76,19,'#ff2bd6');
+  if(best.t42!=null)neonText(`42最速タイム ${fmtTime(best.t42)}`,W/2,H*0.76+30,19,'#ffd54f');
+  if((G.time*2|0)%2)neonText('SPACE / タップ でスタート',W/2,H*0.88,25,'#ffffff');
+  ctx.restore();
+}
+// スキャンライン
+const scanCv=document.createElement('canvas');scanCv.width=1;scanCv.height=3;
+{const c=scanCv.getContext('2d');c.fillStyle='rgba(0,0,0,0.16)';c.fillRect(0,0,1,1);}
+const scanPat=ctx.createPattern(scanCv,'repeat');
+function drawScanlines(){
+  ctx.save();
+  ctx.fillStyle=scanPat;ctx.fillRect(0,0,W,H);
+  // ビネット
+  const v=ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.75);
+  v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(5,0,20,0.5)');
+  ctx.fillStyle=v;ctx.fillRect(0,0,W,H);
+  ctx.restore();
+}
+function drawGlitch(){
+  for(let i=0;i<4;i++){
+    const y=rnd(0,H-20),h2=rnd(4,16),off=rnd(-24,24)*G.glitch;
+    ctx.drawImage(cv,0,y,W,h2,off,y,W,h2);
+  }
+}
+
+// ---------- 入力 ----------
+function startGame(){
+  initAudio();
+  if(AC&&AC.state==='suspended')AC.resume();
+  const keepBest=best;
+  reset();
+  best=keepBest;
+  G.state='playing';
+  if(AC)bgm.next=AC.currentTime+0.1;
+}
+function move(dir){
+  if(G.state!=='playing')return;
+  G.player.lane=clamp(G.player.lane+dir,-LANE_MAX,LANE_MAX);
+}
+addEventListener('keydown',e=>{
+  if(e.repeat)return;
+  if(e.code==='ArrowLeft'||e.code==='KeyA')move(-1);
+  else if(e.code==='ArrowRight'||e.code==='KeyD')move(1);
+  else if(e.code==='Space'||e.code==='Enter'){
+    if(G.state==='title'||G.state==='gameover')startGame();
+  }
+});
+let touchX=null;
+cv.addEventListener('pointerdown',e=>{
+  const r=cv.getBoundingClientRect();
+  const x=(e.clientX-r.left)/r.width*W;
+  if(G.state==='title'||G.state==='gameover'){startGame();return;}
+  touchX=x;
+  move(x<W/2?-1:1);
+});
+cv.addEventListener('pointerup',()=>{touchX=null;});
+
+// ---------- リサイズ ----------
+function fit(){
+  const s=Math.min(innerWidth/W,innerHeight/H);
+  cv.style.width=(W*s)+'px';cv.style.height=(H*s)+'px';
+}
+addEventListener('resize',fit);fit();
+
+// ---------- メインループ ----------
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);
+  last=now;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
