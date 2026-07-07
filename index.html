@@ -3,183 +3,239 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Site</title>
-  <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+  <title>redred.me</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700;900&display=swap" rel="stylesheet">
   <style>
-    #loader-overlay {
-      position: fixed;
-      inset: 0;
-      background: #f4f3ef;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-      transition: opacity 0.6s ease;
-    }
-    #loader-overlay.fade-out {
-      opacity: 0;
-      pointer-events: none;
-    }
-    #loader {
-      width: 200px;
-      height: 200px;
-      position: relative;
-    }
-    #loader svg {
-      display: block;
-      position: absolute;
-      inset: 0;
-    }
-    #whirl {
-      animation: whirl-spin 2.6s linear infinite;
-      transform-origin: 100px 100px;
-    }
-    @keyframes whirl-spin {
-      to { transform: rotate(360deg); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      #whirl { animation: none; }
+    :root {
+      --bg: #fff6e9;
+      --card: #fffdf8;
+      --ink: #432411;
+      --orange: #f08a1d;
+      --red: #c2410c;
+      --deep: #a33b0b;
+      --amber: #ffc24b;
+      --line: #f3ddc0;
     }
 
-    #main-content {
-      opacity: 0;
-      transition: opacity 0.6s ease;
-    }
-    #main-content.visible {
-      opacity: 1;
-    }
+    * { box-sizing: border-box; }
 
     body {
-      font-family: sans-serif;
-      max-width: 600px;
-      margin: 80px auto;
-      padding: 0 20px;
-      line-height: 1.7;
-      color: #333;
+      font-family: "Zen Maru Gothic", sans-serif;
+      background: var(--bg);
+      margin: 0;
+      color: var(--ink);
+      line-height: 1.8;
     }
-    h1 {
-      border-bottom: 2px solid #4a90e2;
-      padding-bottom: 8px;
+
+    /* 画面幅いっぱいのヘッダーバー */
+    .site-header {
+      background: var(--card);
+      border-bottom: 3px solid var(--amber);
+    }
+    .header-inner {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      text-decoration: none;
+    }
+    .brand-name {
+      display: block;
+      font-size: 1.6rem;
+      font-weight: 900;
+      color: var(--red);
+      letter-spacing: 0.04em;
+      line-height: 1.3;
+    }
+    .tagline {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--deep);
+      opacity: 0.75;
+    }
+    .brand .gecko {
+      width: 130px;
+      display: block;
+      image-rendering: pixelated;
+    }
+
+    .site-header nav a {
+      display: inline-block;
+      padding: 7px 20px;
+      border-radius: 999px;
+      background: var(--orange);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      box-shadow: 0 3px 0 var(--deep);
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+    }
+    .site-header nav a:hover {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 var(--deep);
+    }
+
+    /* 本文は読みやすい幅で中央寄せ */
+    main.wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 20px 80px;
+    }
+
+    section.blog h2 {
+      font-size: 1.4rem;
+      font-weight: 900;
+      color: var(--red);
+      border-bottom: 3px solid var(--amber);
+      padding-bottom: 6px;
+      margin: 0 0 20px;
+    }
+    #post-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 12px;
+    }
+    #post-list li a {
+      display: block;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-left: 6px solid var(--orange);
+      border-radius: 12px;
+      padding: 14px 18px;
+      text-decoration: none;
+      color: var(--ink);
+      transition: border-left-color 0.15s ease, transform 0.1s ease;
+    }
+    #post-list li a:hover {
+      border-left-color: var(--red);
+      transform: translateX(3px);
+    }
+    #post-list .post-title {
+      font-weight: 700;
+      font-size: 1.05rem;
+    }
+    #post-list .post-date {
+      font-size: 0.8rem;
+      color: var(--deep);
+      opacity: 0.7;
+    }
+    #post-status {
+      color: var(--deep);
+      opacity: 0.7;
+      font-size: 0.9rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 24px 0 40px;
+      font-size: 0.8rem;
+      color: var(--deep);
+      opacity: 0.6;
     }
   </style>
 </head>
 <body>
-  <div id="loader-overlay">
-    <div id="loader">
-      <svg id="whirl" viewBox="0 0 200 200" width="200" height="200" aria-hidden="true">
-        <circle cx="100" cy="100" r="92" fill="none" stroke="#1c1c1a" stroke-width="1.4"
-                stroke-linecap="round" stroke-dasharray="60 38 22 250" opacity="0.55"/>
-        <circle cx="100" cy="100" r="92" fill="none" stroke="#1c1c1a" stroke-width="1.4"
-                stroke-linecap="round" stroke-dasharray="0 289 60 200" opacity="0.3"/>
-      </svg>
-      <svg id="globe" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Loading"></svg>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="index.html">
+        <span>
+          <span class="brand-name">redred.me</span>
+          <span class="tagline">レオパと暮らす日々のきろく</span>
+        </span>
+        <img class="gecko" src="IMG_1169.GIF" alt="うちのレオパ">
+      </a>
+      <nav>
+        <a href="weather.html">天気を見る</a>
+      </nav>
     </div>
-  </div>
+  </header>
 
-  <div id="main-content">
-    <h1>ようこそ</h1>
-    <p>これは私の最初のウェブサイトでーーす。</p>
-    <p><a href="weather.html">天気を見る</a></p>
-    <img src="みかんちゃん.gif" alt="みかんちゃん" style="max-width: 100%; display: block; margin: 20px auto;">
-    <img src="IMG_1169.GIF" alt="IMG_1169" style="max-width: 100%; display: block; margin: 20px auto;">
-  </div>
+  <main class="wrap">
+    <section class="blog">
+      <h2>ブログ</h2>
+      <p id="post-status">記事を読み込み中…</p>
+      <ul id="post-list"></ul>
+    </section>
+  </main>
+
+  <footer>&copy; 2026 redred.me</footer>
 
   <script>
+  // ブログ記事一覧: リポジトリの posts/ フォルダに .md を追加するだけで記事になる
   (function () {
-    const SIZE = 200;
-    const R = 78;
-    const CENTER = SIZE / 2;
-    const STROKE = "#1c1c1a";
+    const REPO = "Nagasaaan/my-site";
+    const list = document.getElementById("post-list");
+    const status = document.getElementById("post-status");
 
-    const svg = d3.select("#globe");
+    function parseDate(name) {
+      const m = name.match(/^(\d{4}-\d{2}-\d{2})/);
+      return m ? m[1] : "";
+    }
 
-    const projection = d3.geoOrthographic()
-      .scale(R)
-      .translate([CENTER, CENTER])
-      .clipAngle(90);
+    function fallbackTitle(name) {
+      return name.replace(/^\d{4}-\d{2}-\d{2}-?/, "").replace(/\.md$/i, "").replace(/[-_]/g, " ");
+    }
 
-    const path = d3.geoPath(projection);
-
-    svg.append("path")
-      .datum({ type: "Sphere" })
-      .attr("fill", "none")
-      .attr("stroke", STROKE)
-      .attr("stroke-width", 1.5)
-      .attr("d", path);
-
-    const graticule = d3.geoGraticule10();
-    svg.append("path")
-      .datum(graticule)
-      .attr("fill", "none")
-      .attr("stroke", STROKE)
-      .attr("stroke-width", 0.4)
-      .attr("opacity", 0.28);
-
-    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json")
-      .then(world => {
-        const countries = topojson.feature(world, world.objects.countries);
-        const borders = topojson.mesh(world, world.objects.countries, (a, b) => a !== b);
-
-        svg.append("path")
-          .datum(countries)
-          .attr("fill", STROKE)
-          .attr("fill-opacity", 0.9)
-          .attr("stroke", "none");
-
-        svg.append("path")
-          .datum(borders)
-          .attr("fill", "none")
-          .attr("stroke", "#f4f3ef")
-          .attr("stroke-width", 0.5)
-          .attr("stroke-opacity", 0.55);
-
-        render();
+    fetch("https://api.github.com/repos/" + REPO + "/contents/posts")
+      .then(r => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
       })
-      .catch(() => {});
+      .then(files => {
+        const posts = files
+          .filter(f => f.type === "file" && /\.md$/i.test(f.name))
+          .sort((a, b) => b.name.localeCompare(a.name));
 
-    let lon = parseFloat(localStorage.getItem("globe-loader-lon"));
-    if (isNaN(lon)) lon = 0;
-    const tilt = -18;
-    const speed = 28;
+        if (posts.length === 0) {
+          status.textContent = "まだ記事がありません。posts/ フォルダに .md ファイルを追加すると表示されます。";
+          return;
+        }
 
-    function render() {
-      projection.rotate([lon, tilt]);
-      svg.selectAll("path").attr("d", path);
-    }
-
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let last = performance.now();
-    let saveAccum = 0;
-    let animating = true;
-
-    function tick(now) {
-      if (!animating) return;
-      const dt = (now - last) / 1000;
-      last = now;
-      lon = (lon + speed * dt) % 360;
-      render();
-      saveAccum += dt;
-      if (saveAccum > 0.4) {
-        localStorage.setItem("globe-loader-lon", lon.toFixed(2));
-        saveAccum = 0;
-      }
-      requestAnimationFrame(tick);
-    }
-
-    render();
-    if (!reduce) requestAnimationFrame(tick);
-
-    setTimeout(() => {
-      animating = false;
-      const overlay = document.getElementById("loader-overlay");
-      const content = document.getElementById("main-content");
-      overlay.classList.add("fade-out");
-      content.classList.add("visible");
-      overlay.addEventListener("transitionend", () => {
-        overlay.style.display = "none";
-      }, { once: true });
-    }, 3000);
+        return Promise.all(posts.map(f =>
+          fetch(f.download_url)
+            .then(r => r.ok ? r.text() : "")
+            .then(text => {
+              const m = text.match(/^#\s+(.+)$/m);
+              return { name: f.name, title: m ? m[1].trim() : fallbackTitle(f.name), date: parseDate(f.name) };
+            })
+            .catch(() => ({ name: f.name, title: fallbackTitle(f.name), date: parseDate(f.name) }))
+        )).then(items => {
+          status.remove();
+          for (const item of items) {
+            const li = document.createElement("li");
+            const a = document.createElement("a");
+            a.href = "post.html?f=" + encodeURIComponent(item.name);
+            const title = document.createElement("div");
+            title.className = "post-title";
+            title.textContent = item.title;
+            a.appendChild(title);
+            if (item.date) {
+              const date = document.createElement("div");
+              date.className = "post-date";
+              date.textContent = item.date;
+              a.appendChild(date);
+            }
+            li.appendChild(a);
+            list.appendChild(li);
+          }
+        });
+      })
+      .catch(() => {
+        status.textContent = "記事一覧を取得できませんでした（GitHubに公開後に表示されます）。";
+      });
   })();
   </script>
 </body>
