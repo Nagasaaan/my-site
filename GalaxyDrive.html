@@ -250,13 +250,14 @@ function updateFireworks(dt){
 // ---------- スポーン ----------
 function spawnObstacle(){
   const z=G.zoneIdx;
-  const pool=[['ast'],['ast','ast','spin','band'],['ast','spin','band','band'],['ast','spin','band','ufo','laser'],['ast','spin','band','ufo','laser','band']][z];
+  // 障害物は隕石のみ(単発 or 壁状の隊列)
+  const pool=[['ast'],['ast','ast','band'],['ast','band','band'],['ast','band','band'],['ast','band','band']][z];
   const type=pick(pool);
   if(type==='band'){
     // 壁: 1〜2レーンだけ空けて塞ぐ(序盤は必ず2レーン空く)
     const g1=ri(-2,2);
     const g2=(z>=2&&Math.random()<0.4)?g1:((g1+2+ri(1,4))%5)-2;
-    for(let l=-2;l<=2;l++)if(l!==g1&&l!==g2)G.obs.push({type:z>=3?'debris':'ast',t:0,laneF:l,rot:rnd(0,6),spin:rnd(-1,1),sd:rnd(0,10),hit:false,mul:1});
+    for(let l=-2;l<=2;l++)if(l!==g1&&l!==g2)G.obs.push({type:'ast',t:0,laneF:l,rot:rnd(0,6),spin:rnd(-1,1),sd:rnd(0,10),hit:false,mul:1});
   }else if(type==='laser'){
     G.obs.push({type:'laser',t:0,laneF:0,phase:rnd(0,1),hit:false,mul:1});
   }else if(type==='ufo'){
@@ -1202,12 +1203,11 @@ function drawWorld(){
 // 燃える隕石: 灰色の多面体の岩 + 周囲をゆらめく赤い炎 + 漂う火の粉
 function drawMeteor(r,sd,rot){
   const t=G.time;
-  // ゆらめく炎(外側の暗い赤 → 内側の明るい赤の2層)
-  for(const[mul,col,alpha]of[[1.72,'#e0392a',0.8],[1.36,'#ff6a4e',0.9]]){
-    ctx.save();
-    ctx.rotate(t*0.4+sd);
+  // ゆらめく炎(shadowBlurは重いので使わず、外周の淡いレイヤーでグロー風にする)
+  ctx.save();
+  ctx.rotate(t*0.4+sd);
+  for(const[mul,col,alpha]of[[2.05,'#e0392a',0.18],[1.72,'#e0392a',0.8],[1.36,'#ff6a4e',0.9]]){
     ctx.fillStyle=col;ctx.globalAlpha=alpha;
-    ctx.shadowColor='#ff3d2e';ctx.shadowBlur=16;
     ctx.beginPath();
     for(let i=0;i<12;i++){
       const a=i/12*6.28;
@@ -1217,13 +1217,13 @@ function drawMeteor(r,sd,rot){
       i?ctx.lineTo(px,py):ctx.moveTo(px,py);
     }
     ctx.closePath();ctx.fill();
-    ctx.restore();
   }
+  ctx.restore();
   // ふわふわ漂う火の粉
   ctx.save();
-  ctx.fillStyle='#ff8a65';ctx.shadowColor='#ff3d2e';ctx.shadowBlur=8;
-  for(let i=0;i<5;i++){
-    const a=t*0.9+i*1.26+sd;
+  ctx.fillStyle='#ff8a65';
+  for(let i=0;i<4;i++){
+    const a=t*0.9+i*1.57+sd;
     const rr=r*(1.75+0.3*Math.sin(t*1.8+i*2.4+sd));
     ctx.globalAlpha=0.35+0.35*Math.sin(t*2.6+i*1.7);
     ctx.beginPath();ctx.arc(Math.cos(a)*rr,Math.sin(a)*rr*0.85,Math.max(1.2,r*0.09),0,6.28);ctx.fill();
