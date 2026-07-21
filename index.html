@@ -3,147 +3,186 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>redred.me</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700;900&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #fff6e9;
-      --card: #fffdf8;
-      --ink: #432411;
-      --orange: #f08a1d;
-      --red: #c2410c;
-      --deep: #a33b0b;
-      --amber: #ffc24b;
-      --line: #f3ddc0;
+      --bg: #f5f5f7;
+      --card: #ffffff;
+      --text: #1d1d1f;
+      --text-secondary: #6e6e73;
+      --accent: #d9480f;
+      --accent-soft: rgba(217, 72, 15, 0.1);
+      --separator: rgba(0, 0, 0, 0.08);
+      --header-bg: rgba(255, 255, 255, 0.72);
+      --row-hover: rgba(0, 0, 0, 0.035);
+      --radius-lg: 20px;
+      --radius-md: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --card: #1c1c1e;
+        --text: #f5f5f7;
+        --text-secondary: #98989d;
+        --accent: #ff8a4c;
+        --accent-soft: rgba(255, 138, 76, 0.16);
+        --separator: rgba(255, 255, 255, 0.12);
+        --header-bg: rgba(28, 28, 30, 0.72);
+        --row-hover: rgba(255, 255, 255, 0.06);
+      }
     }
 
     * { box-sizing: border-box; }
 
     body {
-      font-family: "Zen Maru Gothic", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro JP", "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif;
       background: var(--bg);
       margin: 0;
-      color: var(--ink);
-      line-height: 1.8;
+      color: var(--text);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
     }
 
-    /* 画面幅いっぱいのヘッダーバー */
+    /* すりガラス調のスティッキーヘッダー */
     .site-header {
-      background: var(--card);
-      border-bottom: 3px solid var(--amber);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--header-bg);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid var(--separator);
     }
     .header-inner {
-      max-width: 1080px;
+      max-width: 760px;
       margin: 0 auto;
-      padding: 12px 24px;
+      padding: 10px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      flex-wrap: wrap;
     }
     .brand {
       display: flex;
       align-items: center;
-      gap: 18px;
+      gap: 10px;
       text-decoration: none;
+      min-width: 0;
     }
+    .brand .gecko {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      object-fit: cover;
+      display: block;
+      flex: none;
+      box-shadow: 0 0 0 0.5px var(--separator);
+    }
+    .brand-text { min-width: 0; }
     .brand-name {
       display: block;
-      font-size: 1.6rem;
-      font-weight: 900;
-      color: var(--red);
-      letter-spacing: 0.04em;
-      line-height: 1.3;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      line-height: 1.25;
     }
     .tagline {
       display: block;
-      font-size: 0.78rem;
-      color: var(--deep);
-      opacity: 0.75;
-    }
-    .brand .gecko {
-      width: 130px;
-      display: block;
-      image-rendering: pixelated;
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
+    .site-header nav {
+      display: flex;
+      gap: 4px;
+    }
     .site-header nav a {
-      display: inline-block;
-      padding: 7px 20px;
-      border-radius: 999px;
-      background: var(--orange);
-      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 14px;
+      border-radius: 980px;
+      color: var(--accent);
       text-decoration: none;
-      font-weight: 700;
-      box-shadow: 0 3px 0 var(--deep);
-      transition: transform 0.1s ease, box-shadow 0.1s ease;
+      font-weight: 500;
+      font-size: 0.88rem;
+      transition: background 0.15s ease;
+      white-space: nowrap;
     }
     .site-header nav a:hover {
-      transform: translateY(2px);
-      box-shadow: 0 1px 0 var(--deep);
+      background: var(--accent-soft);
     }
 
-    /* 本文は読みやすい幅で中央寄せ */
     main.wrap {
-      max-width: 720px;
+      max-width: 760px;
       margin: 0 auto;
-      padding: 48px 20px 80px;
+      padding: 40px 20px 80px;
     }
 
     section.blog h2 {
-      font-size: 1.4rem;
-      font-weight: 900;
-      color: var(--red);
-      border-bottom: 3px solid var(--amber);
-      padding-bottom: 6px;
-      margin: 0 0 20px;
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin: 0 0 14px;
+      padding: 0 4px;
     }
+
+    /* Apple のグループ化リスト風 */
     #post-list {
       list-style: none;
       margin: 0;
       padding: 0;
-      display: grid;
-      gap: 12px;
-    }
-    #post-list li a {
-      display: block;
       background: var(--card);
-      border: 1px solid var(--line);
-      border-left: 6px solid var(--orange);
-      border-radius: 12px;
-      padding: 14px 18px;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+    #post-list li + li { border-top: 1px solid var(--separator); }
+    #post-list li a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
       text-decoration: none;
-      color: var(--ink);
-      transition: border-left-color 0.15s ease, transform 0.1s ease;
+      color: var(--text);
+      transition: background 0.12s ease;
     }
-    #post-list li a:hover {
-      border-left-color: var(--red);
-      transform: translateX(3px);
-    }
+    #post-list li a:hover { background: var(--row-hover); }
     #post-list .post-title {
-      font-weight: 700;
-      font-size: 1.05rem;
+      font-weight: 500;
+      font-size: 1rem;
     }
     #post-list .post-date {
-      font-size: 0.8rem;
-      color: var(--deep);
-      opacity: 0.7;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      flex: none;
+    }
+    #post-list li a::after {
+      content: "";
+      flex: none;
+      width: 8px;
+      height: 8px;
+      border-right: 1.6px solid var(--text-secondary);
+      border-bottom: 1.6px solid var(--text-secondary);
+      transform: rotate(-45deg);
+      opacity: 0.5;
     }
     #post-status {
-      color: var(--deep);
-      opacity: 0.7;
-      font-size: 0.9rem;
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      padding: 4px;
     }
 
     footer {
       text-align: center;
-      padding: 24px 0 40px;
+      padding: 32px 0 40px;
       font-size: 0.8rem;
-      color: var(--deep);
-      opacity: 0.6;
+      color: var(--text-secondary);
     }
   </style>
 </head>
@@ -151,15 +190,15 @@
   <header class="site-header">
     <div class="header-inner">
       <a class="brand" href="index.html">
-        <span>
+        <img class="gecko" src="IMG_1169.GIF" alt="うちのレオパ">
+        <span class="brand-text">
           <span class="brand-name">redred.me</span>
           <span class="tagline">レオパと暮らす日々のきろく</span>
         </span>
-        <img class="gecko" src="IMG_1169.GIF" alt="うちのレオパ">
       </a>
       <nav>
         <a href="GalaxyDrive.html">Galaxy Drive</a>
-        <a href="weather.html">天気を見る</a>
+        <a href="weather.html">天気</a>
       </nav>
     </div>
   </header>
