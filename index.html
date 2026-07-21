@@ -71,10 +71,12 @@
       min-width: 0;
     }
     .brand .gecko {
-      width: 34px;
       height: 34px;
+      width: auto;
+      max-width: 64px;
       border-radius: 9px;
-      object-fit: cover;
+      object-fit: contain;
+      background: var(--card);
       display: block;
       flex: none;
       box-shadow: 0 0 0 0.5px var(--separator);
